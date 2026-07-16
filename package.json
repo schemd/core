@@ -1,6 +1,6 @@
 {
 	"name": "@schemd/core",
-	"version": "0.1.4",
+	"version": "0.1.0",
 	"description": "Strict, bounded, server-side engineering schematic DSL compiler for Marked.",
 	"homepage": "https://johnowolabiidogun.dev/tools/schemd/docs/overview",
 	"bugs": {
