@@ -31,7 +31,7 @@ views; `wiremd` does not claim to implement the full UML class, sequence, or sta
 ## Installation
 
 ```sh
-npm install wiremd marked
+npm install @wiremd/core marked
 ```
 
 `marked` is a peer because the host application owns its Markdown version. Direct parser/renderer
@@ -43,7 +43,7 @@ import {
 	parseSchematicFence,
 	renderSchematic,
 	type WiremdOutputMode
-} from 'wiremd';
+} from '@wiremd/core';
 
 const info = 'wiremd bounds="640x260" title="Sensor front end"';
 const fence = parseSchematicFence(info);
@@ -384,7 +384,7 @@ import {
 	SchematicSyntaxError,
 	type SchematicDocument,
 	type WiremdOutputMode
-} from 'wiremd';
+} from '@wiremd/core';
 ```
 
 - `parseSchematicFence(info, defaultTitle?)` validates fence metadata.
@@ -406,7 +406,7 @@ import {
 ```ts
 // Server-only module
 import { Marked } from 'marked';
-import { schematicMarkedExtension } from 'wiremd';
+import { schematicMarkedExtension } from '@wiremd/core';
 
 function escapeHtml(value: string): string {
 	return value
@@ -561,7 +561,7 @@ the canonical `wiremd` fence and delegate every other token to the host parser.
 
 ```ts
 import MarkdownIt from 'markdown-it';
-import { parseSchematic, parseSchematicFence, renderSchematic } from 'wiremd';
+import { parseSchematic, parseSchematicFence, renderSchematic } from '@wiremd/core';
 
 export function createMarkdown(): MarkdownIt {
 	const markdown = new MarkdownIt({ html: true });
@@ -604,7 +604,7 @@ serializer to preserve trusted raw HTML according to your pipeline's security mo
 
 ```ts
 import type { Code, Html, Parent, Root, RootContent } from 'mdast';
-import { parseSchematic, parseSchematicFence, renderSchematic } from 'wiremd';
+import { parseSchematic, parseSchematicFence, renderSchematic } from '@wiremd/core';
 
 function isParent(node: RootContent | Root): node is Parent {
 	return 'children' in node && Array.isArray(node.children);
