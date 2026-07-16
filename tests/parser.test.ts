@@ -39,29 +39,29 @@ describe('parseSchematicFence', () => {
 	});
 
 	test('parses intrinsic bounds with default and explicit titles', () => {
-		expect(parseSchematicFence('wiremd bounds="640x260"')).toEqual({
+		expect(parseSchematicFence('schemd bounds="640x260"')).toEqual({
 			bounds: { width: 640, height: 260 },
 			title: 'Engineering schematic'
 		});
-		expect(parseSchematicFence('WIREMD bounds="640x260" title="Quantum path"', 'Fallback')).toEqual(
+		expect(parseSchematicFence('SCHEMD bounds="640x260" title="Quantum path"', 'Fallback')).toEqual(
 			{ bounds: { width: 640, height: 260 }, title: 'Quantum path' }
 		);
 	});
 
 	test('rejects missing metadata and each invalid bounds boundary', () => {
-		expect(() => parseSchematicFence('wiremd')).toThrow(/require/);
+		expect(() => parseSchematicFence('schemd')).toThrow(/require/);
 		for (const info of [
-			'wiremd bounds="63x100"',
-			'wiremd bounds="100x63"',
-			'wiremd bounds="4097x100"',
-			'wiremd bounds="100x4097"'
+			'schemd bounds="63x100"',
+			'schemd bounds="100x63"',
+			'schemd bounds="4097x100"',
+			'schemd bounds="100x4097"'
 		]) {
 			expect(() => parseSchematicFence(info)).toThrow(/64 through 4096/);
 		}
-		expect(() => parseSchematicFence(`wiremd bounds="640x260" title="${'x'.repeat(513)}"`)).toThrow(
+		expect(() => parseSchematicFence(`schemd bounds="640x260" title="${'x'.repeat(513)}"`)).toThrow(
 			/titles cannot exceed 512/
 		);
-		expect(() => parseSchematicFence('wiremd bounds="640x260"', 'x'.repeat(513))).toThrow(
+		expect(() => parseSchematicFence('schemd bounds="640x260"', 'x'.repeat(513))).toThrow(
 			/titles cannot exceed 512/
 		);
 	});

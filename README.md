@@ -1,21 +1,21 @@
-# @wiremd/core
+# @schemd/core
 
-[![npm version](https://img.shields.io/npm/v/@wiremd/core.svg?style=flat-square)](https://www.npmjs.com/package/@wiremd/core)
-[![CI status](https://github.com/Sirneij/wiremd/actions/workflows/ci.yml/badge.svg?style=flat-square)](https://github.com/Sirneij/wiremd/actions/workflows/ci.yml)
-[![bundle size](https://deno.bundlejs.com/badge?q=@wiremd/core@0.1.2&style=flat-square)](https://bundlejs.com/?q=@wiremd/core)
-[![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square)](https://github.com/Sirneij/wiremd/actions/workflows/ci.yml)
-[![license](https://img.shields.io/npm/l/@wiremd/core.svg?style=flat-square)](https://github.com/Sirneij/wiremd/blob/main/LICENSE)
+[![npm version](https://img.shields.io/npm/v/@schemd/core.svg?style=flat-square)](https://www.npmjs.com/package/@schemd/core)
+[![CI status](https://github.com/Sirneij/schemd/actions/workflows/ci.yml/badge.svg?style=flat-square)](https://github.com/Sirneij/schemd/actions/workflows/ci.yml)
+[![bundle size](https://deno.bundlejs.com/badge?q=@schemd/core@0.1.2&style=flat-square)](https://bundlejs.com/?q=@schemd/core)
+[![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square)](https://github.com/Sirneij/schemd/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/@schemd/core.svg?style=flat-square)](https://github.com/Sirneij/schemd/blob/main/LICENSE)
 
 **Compile bounded engineering diagrams into accessible inline SVG—without a browser runtime, DOM,
 layout engine, or graphics dependency.**
 
-`@wiremd/core` is a strict TypeScript compiler for coordinate-authored electrical, digital, quantum, and
+`@schemd/core` is a strict TypeScript compiler for coordinate-authored electrical, digital, quantum, and
 system-architecture diagrams. It is designed for trusted server and build boundaries: validate a
 small text DSL, produce intrinsically sized SVG, cache the result, and ship only markup to readers.
 The generic `ic`, `port`, and connection primitives can express UML-style component and architecture
-views; `@wiremd/core` does not claim to implement the full UML class, sequence, or state-machine grammar.
+views; `@schemd/core` does not claim to implement the full UML class, sequence, or state-machine grammar.
 
-## Why @wiremd/core
+## Why @schemd/core
 
 - **Zero runtime dependencies.** `marked` is a type-only peer integration; emitted compiler
   JavaScript does not import it.
@@ -37,7 +37,7 @@ views; `@wiremd/core` does not claim to implement the full UML class, sequence, 
 ## Installation
 
 ```sh
-npm install @wiremd/core marked
+npm install @schemd/core marked
 ```
 
 `marked` is a peer because the host application owns its Markdown version. Direct parser/renderer
@@ -48,13 +48,13 @@ import {
 	parseSchematic,
 	parseSchematicFence,
 	renderSchematic,
-	type WiremdOutputMode
-} from '@wiremd/core';
+	type SchemdOutputMode
+} from '@schemd/core';
 
-const info = 'wiremd bounds="640x260" title="Sensor front end"';
+const info = 'schemd bounds="640x260" title="Sensor front end"';
 const fence = parseSchematicFence(info);
 
-if (!fence) throw new Error('Expected a wiremd fence');
+if (!fence) throw new Error('Expected a schemd fence');
 
 const document = parseSchematic(
 	`port:VIN "V_{in}" at (60, 130) #blue
@@ -65,13 +65,13 @@ R1.out -> C1.in #amber [ortho marker-end=dot]`,
 	fence
 );
 
-const mode: WiremdOutputMode = 'default';
+const mode: SchemdOutputMode = 'default';
 const trustedSvg = renderSchematic(document, { ...fence, mode });
 ```
 
 ## Compiler architecture
 
-`@wiremd/core` is a staged compiler, not a browser drawing widget:
+`@schemd/core` is a staged compiler, not a browser drawing widget:
 
 ```text
 Markdown host / direct API
@@ -95,7 +95,7 @@ bounded SVG writer ──► trusted, intrinsically sized inline markup
   crossing bridges, and final bounds safety.
 - `renderer` writes escaped SVG through a byte-capped sink and applies the selected output mode.
 - `marked-extension` is an optional host adapter. It owns cumulative per-document budgets and
-  delegates every non-`wiremd` code block back to the host renderer.
+  delegates every non-`schemd` code block back to the host renderer.
 - `math-label` is a linear label preprocessor invoked by the renderer; it is not a general TeX
   interpreter.
 
@@ -128,7 +128,7 @@ npm pack --dry-run --json
 wc -c dist/*.js
 ```
 
-Generated payload size is topology-dependent. `@wiremd/core` enforces a 2,097,152-byte compiled SVG cap,
+Generated payload size is topology-dependent. `@schemd/core` enforces a 2,097,152-byte compiled SVG cap,
 and its renderer tests guarantee the relative ordering `default < embedded-css < full` for an
 equivalent document.
 
@@ -146,24 +146,24 @@ Compilation is deliberately finite:
 | Fence title                            |                            512 characters |
 | IC pins                                |                               64 per side |
 
-The Marked extension applies the same budgets cumulatively across every `wiremd` fence in one
+The Marked extension applies the same budgets cumulatively across every `schemd` fence in one
 Markdown parse. Its `preprocess` hook resets counters for the next document. Once a cumulative limit
-is exhausted, later wiremd fences fail immediately without another parse or render. Ordinary prose
+is exhausted, later schemd fences fail immediately without another parse or render. Ordinary prose
 and unrelated code fences never consume these budgets.
 
 IDs, labels, options, colors, and XML text are validated or escaped. Parsed ASTs are deeply frozen
 and capability-branded; `renderSchematic` rejects forged or mutated document objects. The grammar
 uses no recursive rule and no data-dependent unbounded loop.
 
-> Treat compiler output as trusted only when it came directly from `@wiremd/core`. Never pass arbitrary
+> Treat compiler output as trusted only when it came directly from `@schemd/core`. Never pass arbitrary
 > user HTML through the framework examples below.
 
 ## Markdown fence
 
-The canonical language identifier is `wiremd`:
+The canonical language identifier is `schemd`:
 
 ````markdown
-```wiremd bounds="960x560" title="Mixed-signal flight-control processor"
+```schemd bounds="960x560" title="Mixed-signal flight-control processor"
 port:INPUT "Sensor bus" at (46, 140) #slate
 resistor:R1 "10 k\Omega" at (150, 140) #amber
 capacitor:C1 "100 nF" at (280, 140) #blue
@@ -189,7 +189,7 @@ H1.out -> RZ1.in #purple [line marker-end=dot]
 ```
 ````
 
-`wiremd` is case-insensitive in fence metadata, but the language identifier itself is canonical:
+`schemd` is case-insensitive in fence metadata, but the language identifier itself is canonical:
 other fenced languages are delegated to the host Markdown renderer and are never compiled as
 diagrams.
 
@@ -239,7 +239,7 @@ Input and output pins are distributed deterministically across the computed body
 
 An `ic` creates a general rectangular component whose pins are part of the addressable graph:
 
-```wiremd
+```schemd
 ic:U1 "Flight computer" at (420, 220) #blue [left="CLK,DATA,ENABLE" right="FILTERED,FAULT" top="VCC" bottom="GND,RESET"]
 ```
 
@@ -299,13 +299,13 @@ and resolve through `--schematic-color-<alias>`, then `--schematic-vector-fallba
 and values outside the documented grammar are rejected.
 
 ```css
-.wiremd-host {
+.schemd-host {
 	--schematic-vector-fallback: currentColor;
 	--schematic-color-phosphor: oklch(88% 0.24 145deg);
 	--schematic-color-quantum-optical: oklch(76% 0.2 300deg);
 }
 
-.wiremd-host .schematic-token--amber {
+.schemd-host .schematic-token--amber {
 	--schematic-vector: oklch(72% 0.17 65deg);
 }
 ```
@@ -326,7 +326,7 @@ text runs.
 | `\le`, `\ge`, `\neq`                         | `≤`, `≥`, `≠`           |
 | `\rightarrow`, `\sqrt`, `\infty`             | `→`, `√`, `∞`           |
 
-```wiremd
+```schemd
 port:VIN "V_{in} = V_0 \cdot e^{-t/\tau}" at (100, 100) #blue
 resistor:R1 "R_{load} = 10 k\Omega" at (360, 100) #amber
 qgate:RZ "R_Z^{\pi/4}" at (620, 100) #purple [phase="π/4"]
@@ -386,25 +386,25 @@ import {
 	routeConnections,
 	schematicMarkedExtension,
 	SCHEMATIC_LIMITS,
-	WIREMD_OUTPUT_MODES,
+	SCHEMD_OUTPUT_MODES,
 	SchematicSyntaxError,
 	type SchematicDocument,
-	type WiremdOutputMode
-} from '@wiremd/core';
+	type SchemdOutputMode
+} from '@schemd/core';
 ```
 
 - `parseSchematicFence(info, defaultTitle?)` validates fence metadata.
 - `parseSchematic(source, fence)` returns a frozen, renderer-authorized AST.
 - `parseSchematicColor(source, line)` validates semantic, CSS, or alias color input.
 - `renderSchematic(document, options)` generates escaped accessible SVG.
-- `schematicMarkedExtension(options?)` compiles canonical `wiremd` fences through Marked.
+- `schematicMarkedExtension(options?)` compiles canonical `schemd` fences through Marked.
 - `parseMathLabel`, `mathLabelText`, `mathLabelGlyphLength`, and `renderMathLabelTspans` expose the
   bounded label subsystem.
 - `resolvePortPoint`, `positionIcPin`, `enumerateComponentPorts`, `componentTextAnchors`,
   `componentRectangle`, and `componentObstacleRectangle` expose deterministic layout data.
 - `routeConnection` resolves one route; `routeConnections` applies document-level bridge crossings.
 - `validateDocumentGeometry` verifies every component and route against the intrinsic viewBox.
-- `SCHEMATIC_LIMITS`, the `MAX_SCHEMATIC_*` constants, `WIREMD_OUTPUT_MODES`, component-kind domains,
+- `SCHEMATIC_LIMITS`, the `MAX_SCHEMATIC_*` constants, `SCHEMD_OUTPUT_MODES`, component-kind domains,
   marker domains, and strict AST/layout types expose the exact compiler contract.
 
 ## Marked integration
@@ -412,7 +412,7 @@ import {
 ```ts
 // Server-only module
 import { Marked } from 'marked';
-import { schematicMarkedExtension } from '@wiremd/core';
+import { schematicMarkedExtension } from '@schemd/core';
 
 function escapeHtml(value: string): string {
 	return value
@@ -428,8 +428,8 @@ markdown.use(
 	schematicMarkedExtension({
 		mode: 'default',
 		onError(error, source) {
-			console.error('wiremd compilation failed', { message: error.message, line: error.line });
-			return `<pre><code class="language-wiremd">${escapeHtml(source)}</code></pre>`;
+			console.error('schemd compilation failed', { message: error.message, line: error.line });
+			return `<pre><code class="language-schemd">${escapeHtml(source)}</code></pre>`;
 		}
 	})
 );
@@ -453,7 +453,7 @@ attach one delegated listener to the host rather than one listener per SVG node.
 ```tsx
 import { useEffect, useRef } from 'react';
 
-export function WiremdDiagram({ svg }: { readonly svg: string }) {
+export function SchemdDiagram({ svg }: { readonly svg: string }) {
 	const host = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
@@ -528,17 +528,17 @@ onBeforeUnmount(() => host.value?.removeEventListener('click', select));
 ### Angular
 
 Angular sanitizes ordinary HTML bindings. Bypass sanitization only for a string returned directly
-from your own server-side `@wiremd/core` compiler boundary.
+from your own server-side `@schemd/core` compiler boundary.
 
 ```ts
 import { Component, ElementRef, Input, OnChanges, ViewChild } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 @Component({
-	selector: 'app-wiremd-diagram',
+	selector: 'app-schemd-diagram',
 	template: '<div #host [innerHTML]="trustedSvg" (click)="select($event)"></div>'
 })
-export class WiremdDiagramComponent implements OnChanges {
+export class SchemdDiagramComponent implements OnChanges {
 	@Input({ required: true }) svg = '';
 	@ViewChild('host', { static: true }) host!: ElementRef<HTMLDivElement>;
 	trustedSvg!: SafeHtml;
@@ -560,14 +560,14 @@ export class WiremdDiagramComponent implements OnChanges {
 
 ## Alternative Markdown parsers
 
-`@wiremd/core` owns the DSL and SVG contracts, not Markdown tokenization. Adapters should intercept only
-the canonical `wiremd` fence and delegate every other token to the host parser.
+`@schemd/core` owns the DSL and SVG contracts, not Markdown tokenization. Adapters should intercept only
+the canonical `schemd` fence and delegate every other token to the host parser.
 
 ### markdown-it
 
 ```ts
 import MarkdownIt from 'markdown-it';
-import { parseSchematic, parseSchematicFence, renderSchematic } from '@wiremd/core';
+import { parseSchematic, parseSchematicFence, renderSchematic } from '@schemd/core';
 
 export function createMarkdown(): MarkdownIt {
 	const markdown = new MarkdownIt({ html: true });
@@ -577,7 +577,7 @@ export function createMarkdown(): MarkdownIt {
 	markdown.renderer.rules.fence = (tokens, index, options, environment, renderer) => {
 		const token = tokens[index]!;
 		const info = token.info.trim();
-		if (!/^wiremd(?:\s|$)/i.test(info)) {
+		if (!/^schemd(?:\s|$)/i.test(info)) {
 			return fallback
 				? fallback(tokens, index, options, environment, renderer)
 				: renderer.renderToken(tokens, index, options);
@@ -589,7 +589,7 @@ export function createMarkdown(): MarkdownIt {
 		diagramIndex += 1;
 		return renderSchematic(document, {
 			...fence,
-			idPrefix: `wiremd-${diagramIndex}`,
+			idPrefix: `schemd-${diagramIndex}`,
 			mode: 'default'
 		});
 	};
@@ -600,31 +600,31 @@ export function createMarkdown(): MarkdownIt {
 
 Reset `diagramIndex` at your document boundary when a single parser instance compiles multiple
 documents. Apply the exported source/component/connection/output limits cumulatively if untrusted
-documents may contain multiple wiremd fences; the built-in Marked extension already does this.
+documents may contain multiple schemd fences; the built-in Marked extension already does this.
 
 ### remark / rehype
 
 This transformer is intentionally visitor-free. It walks MDAST, replaces only `code` nodes whose
-language is `wiremd`, and creates trusted `html` nodes. Configure `remark-rehype` and the final HTML
+language is `schemd`, and creates trusted `html` nodes. Configure `remark-rehype` and the final HTML
 serializer to preserve trusted raw HTML according to your pipeline's security model.
 
 ```ts
 import type { Code, Html, Parent, Root, RootContent } from 'mdast';
-import { parseSchematic, parseSchematicFence, renderSchematic } from '@wiremd/core';
+import { parseSchematic, parseSchematicFence, renderSchematic } from '@schemd/core';
 
 function isParent(node: RootContent | Root): node is Parent {
 	return 'children' in node && Array.isArray(node.children);
 }
 
-export function remarkWiremd() {
+export function remarkSchemd() {
 	return (tree: Root): void => {
 		let diagramIndex = 0;
 
 		const transform = (parent: Parent): void => {
 			parent.children = parent.children.map((node) => {
-				if (node.type === 'code' && node.lang?.toLowerCase() === 'wiremd') {
+				if (node.type === 'code' && node.lang?.toLowerCase() === 'schemd') {
 					const code = node as Code;
-					const info = `wiremd${code.meta ? ` ${code.meta}` : ''}`;
+					const info = `schemd${code.meta ? ` ${code.meta}` : ''}`;
 					const fence = parseSchematicFence(info);
 					if (!fence) return node;
 					const document = parseSchematic(code.value, fence);
@@ -633,7 +633,7 @@ export function remarkWiremd() {
 						type: 'html',
 						value: renderSchematic(document, {
 							...fence,
-							idPrefix: `wiremd-${diagramIndex}`,
+							idPrefix: `schemd-${diagramIndex}`,
 							mode: 'default'
 						})
 					} satisfies Html;
@@ -655,13 +655,13 @@ The SVG already owns intrinsic dimensions and a `viewBox`. Let CSS scale its box
 coordinates after compilation.
 
 ```css
-.wiremd-container {
+.schemd-container {
 	container-type: inline-size;
 	inline-size: 100%;
 }
 
-.wiremd-container .schematic-frame,
-.wiremd-container .schematic-svg {
+.schemd-container .schematic-frame,
+.schemd-container .schematic-svg {
 	display: block;
 	inline-size: 100%;
 	max-inline-size: 100%;
@@ -669,8 +669,8 @@ coordinates after compilation.
 }
 
 @container (inline-size < 36rem) {
-	.wiremd-container .schematic-label,
-	.wiremd-container .schematic-designator {
+	.schemd-container .schematic-label,
+	.schemd-container .schematic-designator {
 		font-size: 0.9em;
 	}
 }
@@ -685,13 +685,13 @@ Syntax failures throw `SchematicSyntaxError`. When available, `error.line` ident
 Log bounded metadata—not entire potentially sensitive source—in production:
 
 ```ts
-import { SchematicSyntaxError } from 'wiremd';
+import { SchematicSyntaxError } from 'schemd';
 
 try {
 	// parse and render
 } catch (error) {
 	if (error instanceof SchematicSyntaxError) {
-		logger.warn('wiremd.compile_rejected', {
+		logger.warn('schemd.compile_rejected', {
 			line: error.line,
 			message: error.message,
 			sourceCharacters: source.length

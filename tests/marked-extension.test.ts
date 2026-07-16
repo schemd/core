@@ -14,13 +14,13 @@ import {
 	type SchematicSyntaxError
 } from '../src/index.js';
 
-const source = `\`\`\`wiremd bounds="320x160" title="Signal path"
+const source = `\`\`\`schemd bounds="320x160" title="Signal path"
 resistor:R1 "10k" at (80, 80) #amber
 capacitor:C1 "100nF" at (220, 80) #blue
 R1.out -> C1.in #slate
 \`\`\``;
 
-const consolidatedSource = `\`\`\`wiremd bounds="1000x600" title="Bounded mixed-signal system"
+const consolidatedSource = `\`\`\`schemd bounds="1000x600" title="Bounded mixed-signal system"
 port:INPUT "Sensor bus" at (60, 100) #slate
 resistor:R1 "10k" at (160, 100) #amber
 capacitor:C1 "100nF" at (260, 100) rgb(22 132 196)
@@ -45,7 +45,7 @@ H1.out -> CX1.control #purple
 CX1.target -> RZ1.in rgba(142 56 213 / 90%) [bezier]
 \`\`\``;
 
-const vectorMatrixSource = `\`\`\`wiremd bounds="1600x900" title="Complete vector matrix"
+const vectorMatrixSource = `\`\`\`schemd bounds="1600x900" title="Complete vector matrix"
 resistor:R1 "R" at (100, 100) #amber
 capacitor:C1 "C" at (220, 100) #blue
 inductor:L1 "L" at (340, 100) #cyan
@@ -74,7 +74,7 @@ ic:U1 "Flight computer" at (700, 650) #blue [left="A0,A1,A2" right="Y0,Y1" top="
 \`\`\``;
 
 function schematicFence(body: string, bounds = '320x160'): string {
-	return `\`\`\`wiremd bounds="${bounds}"\n${body}\n\`\`\``;
+	return `\`\`\`schemd bounds="${bounds}"\n${body}\n\`\`\``;
 }
 
 function paddedSchematicBody(length: number, id: string): string {
@@ -220,7 +220,7 @@ describe('schematicMarkedExtension', () => {
 
 	test('enforces the aggregate UTF-8 SVG output budget before returning another diagram', () => {
 		const body = 'resistor:R1 "R" at (160, 80) #amber';
-		const fence = parseSchematicFence('wiremd bounds="320x160"');
+		const fence = parseSchematicFence('schemd bounds="320x160"');
 		if (!fence) throw new Error('Expected a schematic fence fixture.');
 		const document = parseSchematic(body, fence);
 		const encoder = new TextEncoder();
@@ -328,27 +328,27 @@ describe('schematicMarkedExtension', () => {
 		const standard = new Marked();
 		standard.use(schematicMarkedExtension());
 		const fallback = standard.parse(
-			'```wiremd bounds="320x160"\nresistor:R1 "<bad>" at (80, 80) url(javascript:alert(1))\n```'
+			'```schemd bounds="320x160"\nresistor:R1 "<bad>" at (80, 80) url(javascript:alert(1))\n```'
 		) as string;
 		expect(fallback).toContain('schematic-error');
 		expect(fallback).toContain('&lt;bad&gt;');
 		expect(fallback).toContain('Unsafe or unsupported color');
 		const geometryFallback = standard.parse(
-			'```wiremd bounds="100x100"\nresistor:R1 "edge" at (10, 50) #amber\n```'
+			'```schemd bounds="100x100"\nresistor:R1 "edge" at (10, 50) #amber\n```'
 		) as string;
 		expect(geometryFallback).toContain('geometry exceeds the declared 100x100 bounds');
 
 		const onError = vi.fn(() => '<p data-observed>invalid</p>');
 		const observed = new Marked();
 		observed.use(schematicMarkedExtension({ onError }));
-		expect(observed.parse('```wiremd\ninvalid\n```')).toContain('data-observed');
+		expect(observed.parse('```schemd\ninvalid\n```')).toContain('data-observed');
 		expect(onError).toHaveBeenCalledOnce();
 	});
 
 	test('reserves the complete eight-pixel hotspot at both route boundaries', () => {
 		const marked = new Marked();
 		marked.use(schematicMarkedExtension({ mode: 'full' }));
-		const html = marked.parse(`\`\`\`wiremd bounds="200x100"
+		const html = marked.parse(`\`\`\`schemd bounds="200x100"
 resistor:R1 "left" at (46, 50) #amber
 capacitor:C1 "right" at (154, 50) #blue
 R1.in -> C1.out #slate
@@ -361,7 +361,7 @@ R1.in -> C1.out #slate
 		const marked = new Marked();
 		marked.use(schematicMarkedExtension({ defaultTitle: 'System interconnect' }));
 		const html = marked.parse(
-			'```wiremd bounds="320x160"\nresistor:R1 "10k" at (80, 80) #amber\n```'
+			'```schemd bounds="320x160"\nresistor:R1 "10k" at (80, 80) #amber\n```'
 		) as string;
 		expect(html).toContain('<title id="schematic-1-title">System interconnect</title>');
 	});
@@ -374,6 +374,6 @@ R1.in -> C1.out #slate
 			}
 		});
 		marked.use(schematicMarkedExtension(options));
-		expect(() => marked.parse('```wiremd bounds="320x160"\ninvalid\n```')).toThrow('unexpected');
+		expect(() => marked.parse('```schemd bounds="320x160"\ninvalid\n```')).toThrow('unexpected');
 	});
 });

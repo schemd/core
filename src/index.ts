@@ -1,5 +1,5 @@
 /**
- * Stable public entry point for the `wiremd` server-side compiler.
+ * Stable public entry point for the `schemd` server-side compiler.
  *
  * All runtime exports are dependency-free. The Marked integration imports
  * Marked contracts as types only, so applications pay for no Markdown runtime
@@ -57,7 +57,7 @@ export {
 	SCHEMATIC_SIGNAL_MARKERS,
 	SEMANTIC_COLORS,
 	TRANSISTOR_TYPES,
-	WIREMD_OUTPUT_MODES,
+	SCHEMD_OUTPUT_MODES,
 	SchematicSyntaxError,
 	type AnalogKind,
 	type CompileSchematicOptions,
@@ -85,7 +85,7 @@ export {
 	type SchematicSignalMarker,
 	type SchematicMarkedOptions,
 	type SchematicPoint,
-	type WiremdOutputMode,
+	type SchemdOutputMode,
 	type TransistorComponent,
 	type TransistorType,
 	type QuantumGateComponent,

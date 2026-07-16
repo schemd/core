@@ -1,14 +1,14 @@
 {
-	"name": "@wiremd/core",
-	"version": "0.1.3",
+	"name": "@schemd/core",
+	"version": "0.1.4",
 	"description": "Strict, bounded, server-side engineering schematic DSL compiler for Marked.",
-	"homepage": "https://johnowolabiidogun.dev/tools/wiremd/docs/overview",
+	"homepage": "https://johnowolabiidogun.dev/tools/schemd/docs/overview",
 	"bugs": {
-		"url": "https://github.com/Sirneij/wiremd/issues"
+		"url": "https://github.com/Sirneij/schemd/issues"
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/Sirneij/wiremd.git"
+		"url": "git+https://github.com/Sirneij/schemd.git"
 	},
 	"type": "module",
 	"sideEffects": false,
@@ -45,7 +45,7 @@
 		"node": ">=24"
 	},
 	"keywords": [
-		"wiremd",
+		"schemd",
 		"marked",
 		"schematic",
 		"svg",

@@ -1,5 +1,5 @@
 /**
- * Bounded, dependency-free SVG serializer for validated `wiremd` documents.
+ * Bounded, dependency-free SVG serializer for validated `schemd` documents.
  *
  * The renderer accepts only parser-provenanced immutable ASTs, performs no DOM
  * measurement, and writes through a UTF-8 byte-budgeted sink. Output modes share
@@ -24,7 +24,7 @@ import { MAX_SCHEMATIC_SVG_OUTPUT_BYTES, utf8ByteLength } from './limits.js';
 import { assertParsedSchematicDocument } from './parser.js';
 import {
 	CLASSICAL_GATE_KINDS,
-	WIREMD_OUTPUT_MODES,
+	SCHEMD_OUTPUT_MODES,
 	SchematicSyntaxError,
 	type ClassicalGateComponent,
 	type CompileSchematicOptions,
@@ -36,7 +36,7 @@ import {
 	type SchematicComponent,
 	type SchematicConnection,
 	type SchematicDocument,
-	type WiremdOutputMode,
+	type SchemdOutputMode,
 	type TransistorComponent
 } from './types.js';
 import { renderMathLabelTspans } from './math-label.js';
@@ -67,7 +67,7 @@ interface NormalizedCompileOptions extends CompileSchematicOptions {
 	/** Non-empty accessible diagram title. */
 	title: string;
 	/** Explicit output-budget mode. */
-	mode: WiremdOutputMode;
+	mode: SchemdOutputMode;
 }
 
 /**
@@ -199,11 +199,11 @@ function normalizeCompileOptions(value: unknown): NormalizedCompileOptions {
 	const mode = candidate.mode;
 	if (
 		mode !== undefined &&
-		(typeof mode !== 'string' || !WIREMD_OUTPUT_MODES.includes(mode as WiremdOutputMode))
+		(typeof mode !== 'string' || !SCHEMD_OUTPUT_MODES.includes(mode as SchemdOutputMode))
 	) {
 		throw new SchematicSyntaxError('Render mode must be one of: default, embedded-css, or full.');
 	}
-	const normalizedMode = (mode ?? 'default') as WiremdOutputMode;
+	const normalizedMode = (mode ?? 'default') as SchemdOutputMode;
 	return idPrefix === undefined
 		? { bounds: { width, height }, title, mode: normalizedMode }
 		: { bounds: { width, height }, title, idPrefix, mode: normalizedMode };
@@ -832,7 +832,7 @@ function componentMarkup(
 	index: number,
 	idPrefix: string,
 	glowId: string,
-	mode: WiremdOutputMode,
+	mode: SchemdOutputMode,
 	symbolId: string | undefined
 ): string {
 	const label = escapeXml(component.label);

@@ -1,5 +1,5 @@
 /**
- * Bounded lexer, parser, and semantic validator for the `wiremd` DSL.
+ * Bounded lexer, parser, and semantic validator for the `schemd` DSL.
  *
  * Parsing is synchronous and deterministic. This module accepts no DOM or
  * browser globals, validates all author-controlled strings before they reach
@@ -51,11 +51,11 @@ const COMPONENT_PATTERN =
 const CONNECTION_PATTERN =
 	/^([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9_-]*)\s*->\s*([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9_-]*)\s+(.+)$/;
 /**
- * Matches the canonical `wiremd` Markdown information string. The legacy
+ * Matches the canonical `schemd` Markdown information string. The legacy
  * `schematic` identifier remains an input-only alias so previously persisted
  * articles continue to render; documentation and generated source never emit it.
  */
-const WIREMD_FENCE_PATTERN = /^wiremd\s+bounds="(\d+)x(\d+)"(?:\s+title="([^"]+)")?\s*$/i;
+const SCHEMD_FENCE_PATTERN = /^schemd\s+bounds="(\d+)x(\d+)"(?:\s+title="([^"]+)")?\s*$/i;
 /** Strict finite decimal syntax used by CSS functional-color channels. */
 const NUMBER_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 /** CSS angle syntax accepted for HSL hue channels. */
@@ -912,10 +912,10 @@ function validateEndpoint(
 }
 
 /**
- * Parse and validate a wiremd fenced-code information string.
+ * Parse and validate a schemd fenced-code information string.
  *
  * @param info - The complete Markdown fence information string beginning with
- *   the canonical `wiremd` language identifier.
+ *   the canonical `schemd` language identifier.
  * @param defaultTitle - Accessible SVG title used when `title` is omitted.
  * @returns Validated intrinsic bounds and title, or `undefined` when the fence
  *   belongs to another language.
@@ -926,13 +926,13 @@ export function parseSchematicFence(
 	info: string | undefined,
 	defaultTitle = 'Engineering schematic'
 ): SchematicFence | undefined {
-	if (info === undefined || !/^wiremd(?:\s|$)/i.test(info.trim())) {
+	if (info === undefined || !/^schemd(?:\s|$)/i.test(info.trim())) {
 		return undefined;
 	}
-	const match = info.trim().match(WIREMD_FENCE_PATTERN);
+	const match = info.trim().match(SCHEMD_FENCE_PATTERN);
 	if (!match) {
 		throw new SchematicSyntaxError(
-			'wiremd fences require: wiremd bounds="WIDTHxHEIGHT" title="Optional title".'
+			'schemd fences require: schemd bounds="WIDTHxHEIGHT" title="Optional title".'
 		);
 	}
 	const width = Number(match[1]);
@@ -948,7 +948,7 @@ export function parseSchematicFence(
 }
 
 /**
- * Compile validated wiremd DSL source into an immutable schematic AST.
+ * Compile validated schemd DSL source into an immutable schematic AST.
  *
  * @param source - Diagram declarations excluding the surrounding Markdown fence.
  * @param fence - Intrinsic dimensions and accessible title returned by

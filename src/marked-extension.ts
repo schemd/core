@@ -1,5 +1,5 @@
 /**
- * Type-only Marked adapter for compiling fenced `wiremd` diagrams during SSR.
+ * Type-only Marked adapter for compiling fenced `schemd` diagrams during SSR.
  *
  * The module imports no Marked runtime. Its factory returns ordinary extension
  * hooks to a host-owned parser and enforces both per-diagram compiler ceilings
@@ -21,13 +21,13 @@ import { SchematicSyntaxError, type SchematicMarkedOptions } from './types.js';
 
 /** Aggregate compiler resources consumed during one Marked document pass. */
 interface MarkedDocumentBudget {
-	/** Total DSL characters accepted from recognized wiremd fences. */
+	/** Total DSL characters accepted from recognized schemd fences. */
 	sourceCharacters: number;
-	/** Total parsed components across recognized wiremd fences. */
+	/** Total parsed components across recognized schemd fences. */
 	components: number;
-	/** Total parsed connections across recognized wiremd fences. */
+	/** Total parsed connections across recognized schemd fences. */
 	connections: number;
-	/** Total UTF-8 bytes emitted across recognized wiremd fences. */
+	/** Total UTF-8 bytes emitted across recognized schemd fences. */
 	svgOutputBytes: number;
 }
 
@@ -89,15 +89,15 @@ function escapeHtml(value: string): string {
  * @returns Trusted fallback markup containing no executable author HTML.
  */
 function defaultErrorRenderer(error: SchematicSyntaxError, source: string): string {
-	return `<figure class="schematic-error" role="group" aria-label="Schematic compilation error"><figcaption>${escapeHtml(error.message)}</figcaption><pre><code class="language-wiremd">${escapeHtml(source)}</code></pre></figure>`;
+	return `<figure class="schematic-error" role="group" aria-label="Schematic compilation error"><figcaption>${escapeHtml(error.message)}</figcaption><pre><code class="language-schemd">${escapeHtml(source)}</code></pre></figure>`;
 }
 
 /**
- * Create a bounded Marked extension that compiles `wiremd` fences into inline SVG.
+ * Create a bounded Marked extension that compiles `schemd` fences into inline SVG.
  *
  * The returned extension keeps aggregate per-document budgets in closure state,
  * resets them from Marked's `preprocess` hook, and recognizes only the canonical
- * `wiremd` language identifier.
+ * `schemd` language identifier.
  *
  * @param options - Output mode, accessible-title fallback, dynamic mode resolver,
  *   and trusted server-side diagnostic renderer.
@@ -121,9 +121,9 @@ export function schematicMarkedExtension(options: SchematicMarkedOptions = {}): 
 			}
 		},
 		renderer: {
-			/** Compile recognized wiremd code tokens and delegate other languages to Marked. */
+			/** Compile recognized schemd code tokens and delegate other languages to Marked. */
 			code(token: Tokens.Code) {
-				if (!token.lang || !/^wiremd(?:\s|$)/i.test(token.lang.trim())) {
+				if (!token.lang || !/^schemd(?:\s|$)/i.test(token.lang.trim())) {
 					return false;
 				}
 				try {

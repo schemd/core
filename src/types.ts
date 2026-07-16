@@ -1,5 +1,5 @@
 /**
- * Public abstract-syntax-tree and compiler option contracts for `wiremd`.
+ * Public abstract-syntax-tree and compiler option contracts for `schemd`.
  *
  * The declarations in this module are deliberately data-only. They can be
  * imported with `import type` by hosts without initializing a renderer,
@@ -71,7 +71,7 @@ export type SchematicColor =
 	| { kind: 'css'; value: string }
 	| { kind: 'alias'; value: string };
 
-/** Intrinsic SVG canvas dimensions declared by a `wiremd` fence. */
+/** Intrinsic SVG canvas dimensions declared by a `schemd` fence. */
 export interface SchematicBounds {
 	/** Horizontal viewBox extent in coordinate units. */
 	width: number;
@@ -79,7 +79,7 @@ export interface SchematicBounds {
 	height: number;
 }
 
-/** Validated metadata parsed from a fenced `wiremd` declaration. */
+/** Validated metadata parsed from a fenced `schemd` declaration. */
 export interface SchematicFence {
 	/** Static dimensions used to reserve layout space before browser paint. */
 	bounds: SchematicBounds;
@@ -99,7 +99,7 @@ export interface SchematicPoint {
 interface ComponentBase extends SchematicPoint {
 	/** Document-unique component identifier used by connection endpoints. */
 	id: string;
-	/** Human-readable label, optionally containing wiremd micro-math syntax. */
+	/** Human-readable label, optionally containing schemd micro-math syntax. */
 	label: string;
 	/** Sanitized semantic or custom vector color. */
 	color: SchematicColor;
@@ -240,9 +240,9 @@ export interface SchematicDocument {
 }
 
 /** Supported SVG output budgets, ordered from smallest to most interactive. */
-export const WIREMD_OUTPUT_MODES = ['default', 'embedded-css', 'full'] as const;
+export const SCHEMD_OUTPUT_MODES = ['default', 'embedded-css', 'full'] as const;
 /** Static, CSS-enhanced, or fully attributed SVG output mode. */
-export type WiremdOutputMode = (typeof WIREMD_OUTPUT_MODES)[number];
+export type SchemdOutputMode = (typeof SCHEMD_OUTPUT_MODES)[number];
 
 /** Marker primitives that can terminate or originate a signal trace. */
 export const SCHEMATIC_SIGNAL_MARKERS = ['none', 'arrow', 'dot'] as const;
@@ -254,17 +254,17 @@ export interface CompileSchematicOptions extends SchematicFence {
 	/** Caller-controlled, sanitized prefix preventing duplicate SVG definition IDs. */
 	idPrefix?: string;
 	/** Markup and interaction budget for the generated SVG. */
-	mode?: WiremdOutputMode;
+	mode?: SchemdOutputMode;
 }
 
 /** Configuration accepted by the type-only Marked extension factory. */
 export interface SchematicMarkedOptions {
 	/** Accessible title used when the fence omits one. */
 	defaultTitle?: string;
-	/** Fixed output mode for every wiremd fence in a Markdown pass. */
-	mode?: WiremdOutputMode;
+	/** Fixed output mode for every schemd fence in a Markdown pass. */
+	mode?: SchemdOutputMode;
 	/** Synchronous mode resolver for hosts with request-scoped rendering state. */
-	resolveMode?: () => WiremdOutputMode;
+	resolveMode?: () => SchemdOutputMode;
 	/** Optional safe fallback renderer for bounded syntax failures. */
 	onError?: (error: SchematicSyntaxError, source: string) => string;
 }
