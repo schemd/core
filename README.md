@@ -1,5 +1,11 @@
 # @wiremd/core
 
+[![npm version](https://img.shields.io/npm/v/@wiremd/core.svg?style=flat-square)](https://www.npmjs.com/package/@wiremd/core)
+[![CI status](https://github.com/Sirneij/wiremd/actions/workflows/ci.yml/badge.svg?style=flat-square)](https://github.com/Sirneij/wiremd/actions/workflows/ci.yml)
+[![bundle size](https://deno.bundlejs.com/badge?q=@wiremd/core@0.1.2&style=flat-square)](https://bundlejs.com/?q=@wiremd/core)
+[![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square)](https://github.com/Sirneij/wiremd/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/@wiremd/core.svg?style=flat-square)](https://github.com/Sirneij/wiremd/blob/main/LICENSE)
+
 **Compile bounded engineering diagrams into accessible inline SVG—without a browser runtime, DOM,
 layout engine, or graphics dependency.**
 
