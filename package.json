@@ -1,0 +1,57 @@
+{
+	"name": "wiremd",
+	"version": "0.1.0",
+	"description": "Strict, bounded, server-side engineering schematic DSL compiler for Marked.",
+	"homepage": "https://johnowolabiidogun.dev/tools/wiremd/docs/overview",
+	"bugs": {
+		"url": "https://github.com/Sirneij/wiremd/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Sirneij/wiremd.git",
+		"directory": "packages/wiremd"
+	},
+	"type": "module",
+	"sideEffects": false,
+	"browser": false,
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.build.json && tsc -p tsconfig.types.json",
+		"check": "tsc -p tsconfig.json --noEmit",
+		"prepack": "npm run build",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"peerDependencies": {
+		"marked": ">=17 <19"
+	},
+	"devDependencies": {
+		"@vitest/coverage-v8": "^4.1.10",
+		"marked": "^18.0.6",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.10"
+	},
+	"engines": {
+		"node": ">=24"
+	},
+	"keywords": [
+		"wiremd",
+		"marked",
+		"schematic",
+		"svg",
+		"compiler",
+		"engineering"
+	],
+	"license": "MIT"
+}
