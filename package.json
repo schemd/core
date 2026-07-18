@@ -2,7 +2,7 @@
 	"name": "@schemd/core",
 	"version": "0.2.0",
 	"description": "Zero-dependency text-to-SVG compiler for schematics and UML.",
-	"homepage": "https://johnowolabiidogun.dev/tools/schemd/docs/overview",
+	"homepage": "https://johnowolabiidogun.dev/tools/schemd",
 	"bugs": {
 		"url": "https://github.com/Sirneij/schemd/issues"
 	},
@@ -17,7 +17,9 @@
 	"types": "./dist/index.d.ts",
 	"files": [
 		"dist",
-		"README.md"
+		"README.md",
+		"assets/brand/schemd-logo.svg",
+		"assets/brand/schemd-mark.svg"
 	],
 	"exports": {
 		".": {

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/brand/schemd-logo.svg" alt="Schemd — engineering vectors" width="640" />
+</p>
+
 # @schemd/core
 
 Write schematics and UML as text. Get accessible, deterministic SVG.
