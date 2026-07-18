@@ -1,0 +1,44 @@
+name: Claim roadmap work
+description: Propose an implementation for one active roadmap item.
+title: "[ROADMAP] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for picking up an active roadmap item. Please agree on the shape of a large change here before opening a pull request.
+  - type: input
+    id: item
+    attributes:
+      label: Roadmap item
+      description: Copy the stable ID from ROADMAP.md.
+      placeholder: P1-02
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: Proposed approach
+      description: Describe the algorithm, API impact, compatibility risks, and tests you plan to add.
+      placeholder: I plan to...
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope boundaries
+      description: Note what this work intentionally will not change.
+    validations:
+      required: true
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: Project contract
+      options:
+        - label: I checked for an existing issue or pull request for this item.
+          required: true
+        - label: I will keep runtime dependencies at zero and the compiler below 20 KiB gzip.
+          required: true
+        - label: I will add tests and keep statements, branches, functions, and lines at 100% coverage.
+          required: true
+        - label: The completing pull request will remove this item from both active timelines.
+          required: true

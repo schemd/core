@@ -459,6 +459,67 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 		);
 	});
 
+	test('skips subpixel bridges that would serialize as zero-radius arcs', () => {
+		const terminal = (id: string, x: number, y: number): PortComponent => ({
+			kind: 'port', id, label: id, x, y, color: token, line: 1
+		});
+		const components = new Map<string, SchematicComponent>();
+		for (const component of [
+			terminal('L', 0, 120),
+			terminal('R', 600, 120),
+			terminal('T1', 300, 0),
+			terminal('B1', 300, 240),
+			terminal('T2', 300.0004, 0),
+			terminal('B2', 300.0004, 240),
+			terminal('L1', 0, 120),
+			terminal('R1', 600, 120),
+			terminal('L2', 0, 120.0004),
+			terminal('R2', 600, 120.0004),
+			terminal('T', 300, 0),
+			terminal('B', 300, 240)
+		]) {
+			components.set(component.id, component);
+		}
+		const connection = (
+			from: string,
+			fromPort: 'in' | 'out',
+			to: string,
+			toPort: 'in' | 'out'
+		): SchematicConnection => ({
+			from: { componentId: from, port: fromPort },
+			to: { componentId: to, port: toPort },
+			color: token,
+			curve: 'ortho',
+			markerStart: 'none',
+			markerEnd: 'none',
+			line: 2
+		});
+		const endpointOnlyMap = {
+			get: (id: string) => components.get(id),
+			values: () => [][Symbol.iterator]()
+		} as unknown as ReadonlyMap<string, SchematicComponent>;
+		const horizontal = routeConnections(
+			[
+				connection('T1', 'out', 'B1', 'out'),
+				connection('T2', 'out', 'B2', 'out'),
+				connection('L', 'out', 'R', 'in')
+			],
+			endpointOnlyMap
+		);
+		expect(horizontal[2]!.d).not.toContain(' A 0 0 ');
+		expect(horizontal[2]!.d).not.toContain(' A ');
+		const vertical = routeConnections(
+			[
+				connection('L1', 'out', 'R1', 'in'),
+				connection('L2', 'out', 'R2', 'in'),
+				connection('T', 'out', 'B', 'out')
+			],
+			endpointOnlyMap
+		);
+		expect(vertical[2]!.d).not.toContain(' A 0 0 ');
+		expect(vertical[2]!.d).not.toContain(' A ');
+	});
+
 	test('never applies crossing arcs to line or bezier routes', () => {
 		const left: PortComponent = { kind: 'port', id: 'L', label: 'L', x: 50, y: 120, color: token, line: 1 };
 		const right: PortComponent = { ...left, id: 'R', x: 450 };
@@ -578,6 +639,30 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 			to: { componentId: 'BOTTOM', port: 'control' },
 			color: token, curve: 'ortho', markerStart: 'none', markerEnd: 'none', line: 13
 		}, components)).toThrow('Line 13: Orthogonal route intersects NEIGHBOR after routing.');
+	});
+
+	test('connects aligned terminals when endpoint clearance corridors overlap', () => {
+		const left: PassiveComponent = {
+			kind: 'resistor', id: 'LEFT', label: 'left', x: 100, y: 120, color: token, line: 1
+		};
+		const right: PassiveComponent = { ...left, id: 'RIGHT', label: 'right', x: 194 };
+		const components = new Map(
+			[left, right].map((component) => [component.id, component] as const)
+		);
+		const route = routeConnection(
+			{
+				from: { componentId: 'LEFT', port: 'out' },
+				to: { componentId: 'RIGHT', port: 'in' },
+				color: token,
+				curve: 'ortho',
+				markerStart: 'none',
+				markerEnd: 'none',
+				line: 14
+			},
+			components
+		);
+		expect(route.d).toBe('M 142 120 H 152');
+		expect(route.points).toEqual([{ x: 142, y: 120 }, { x: 152, y: 120 }]);
 	});
 
 	test('caps adversarial crossing growth before quadratic output allocation', () => {

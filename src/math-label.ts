@@ -8,6 +8,8 @@
  * @packageDocumentation
  */
 
+import { escapeXml } from './xml.js';
+
 /** Visual baseline category assigned to one parsed label segment. */
 export type MathLabelSegmentKind = 'text' | 'subscript' | 'superscript';
 
@@ -54,39 +56,6 @@ const MATH_SYMBOLS: Readonly<Record<string, string>> = Object.freeze({
 	theta: 'θ',
 	times: '×'
 });
-
-/**
- * Determine whether a Unicode code point may be serialized in XML 1.0.
- *
- * @param codePoint - Scalar value obtained while iterating a JavaScript string.
- * @returns Whether XML permits the value in character data.
- */
-function validXmlCodePoint(codePoint: number): boolean {
-	if (codePoint === 0x09 || codePoint === 0x0a || codePoint === 0x0d) return true;
-	if (codePoint >= 0x20 && codePoint <= 0xd7ff) return true;
-	if (codePoint >= 0xe000 && codePoint <= 0xfffd) return true;
-	return codePoint >= 0x10000 && codePoint <= 0x10ffff;
-}
-
-/**
- * Replace forbidden code points and escape XML-significant label characters.
- *
- * @param value - Unicode label segment controlled by a schematic author.
- * @returns Safe XML character data suitable inside an SVG `<text>` node.
- */
-function escapeXml(value: string): string {
-	let normalized = '';
-	for (const character of value) {
-		const codePoint = character.codePointAt(0)!;
-		normalized += validXmlCodePoint(codePoint) ? character : '\ufffd';
-	}
-	return normalized
-		.replaceAll('&', '&amp;')
-		.replaceAll('<', '&lt;')
-		.replaceAll('>', '&gt;')
-		.replaceAll('"', '&quot;')
-		.replaceAll("'", '&#39;');
-}
 
 /**
  * Resolve the backslash command beginning at an exact string offset.

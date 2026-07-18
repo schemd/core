@@ -22,6 +22,7 @@ import {
 } from './layout.js';
 import { MAX_SCHEMATIC_SVG_OUTPUT_BYTES, utf8ByteLength } from './limits.js';
 import { assertParsedSchematicDocument } from './parser.js';
+import { parsedSchematicRoutes } from './route-cache.js';
 import {
 	CLASSICAL_GATE_KINDS,
 	SCHEMD_OUTPUT_MODES,
@@ -46,6 +47,7 @@ import {
 	type UmlStateComponent
 } from './types.js';
 import { mathLabelTextWidth, renderMathLabelTspans } from './math-label.js';
+import { escapeXml } from './xml.js';
 
 /**
  * Legacy alias for the hard SVG allocation ceiling.
@@ -86,49 +88,6 @@ function semanticHookBit(hook: SchematicSemanticHook): number {
 	if (hook === 'nodes') return NODE_HOOK;
 	if (hook === 'ports') return PORT_HOOK;
 	return WIRE_HOOK;
-}
-
-/**
- * Determine whether a Unicode code point may be serialized in XML 1.0.
- *
- * @param codePoint - Scalar value produced while iterating a JavaScript string.
- * @returns Whether XML 1.0 permits the code point in character data or attributes.
- */
-function validXmlCodePoint(codePoint: number): boolean {
-	if (codePoint === 0x09 || codePoint === 0x0a || codePoint === 0x0d) return true;
-	if (codePoint >= 0x20 && codePoint <= 0xd7ff) return true;
-	if (codePoint >= 0xe000 && codePoint <= 0xfffd) return true;
-	return codePoint >= 0x10000 && codePoint <= 0x10ffff;
-}
-
-/**
- * Replace XML-forbidden controls and noncharacters with the replacement character.
- *
- * @param value - Potentially author-controlled text.
- * @returns XML-serializable Unicode string before metacharacter escaping.
- */
-function replaceInvalidXmlCharacters(value: string): string {
-	let normalized = '';
-	for (const character of value) {
-		const codePoint = character.codePointAt(0)!;
-		normalized += validXmlCodePoint(codePoint) ? character : '\ufffd';
-	}
-	return normalized;
-}
-
-/**
- * Sanitize arbitrary text for safe insertion into XML text or attribute contexts.
- *
- * @param value - Text to normalize and escape.
- * @returns XML-safe character data with no executable markup.
- */
-function escapeXml(value: string): string {
-	return replaceInvalidXmlCharacters(value)
-		.replaceAll('&', '&amp;')
-		.replaceAll('<', '&lt;')
-		.replaceAll('>', '&gt;')
-		.replaceAll('"', '&quot;')
-		.replaceAll("'", '&#39;');
 }
 
 /**
@@ -635,7 +594,7 @@ function integratedCircuitShape(component: IntegratedCircuitComponent, paint: st
 
 /** Serialize one left-aligned UML compartment row. */
 function umlRow(value: string, x: number, y: number): string {
-	return `<text class="schematic-uml-text schematic-uml-row" fill="currentColor" stroke="none" x="${svgNumber(x)}" y="${svgNumber(y)}" font-size="12">${escapeXml(value)}</text>`;
+	return `<text class="schematic-uml-text schematic-uml-row" fill="currentColor" stroke="none" x="${svgNumber(x)}" y="${svgNumber(y)}" font-size="12">${renderMathLabelTspans(value)}</text>`;
 }
 
 /** Render a dynamically sized three-compartment UML class. */
@@ -649,7 +608,7 @@ function umlClassShape(component: UmlClassComponent, paint: string): string {
 	const stereotype =
 		component.stereotype === undefined
 			? ''
-			: `<text class="schematic-uml-text schematic-uml-stereotype" fill="currentColor" stroke="none" x="0" y="${svgNumber(top + 13)}" text-anchor="middle" font-size="11">«${escapeXml(component.stereotype)}»</text>`;
+			: `<text class="schematic-uml-text schematic-uml-stereotype" fill="currentColor" stroke="none" x="0" y="${svgNumber(top + 13)}" text-anchor="middle" font-size="11">«${renderMathLabelTspans(component.stereotype)}»</text>`;
 	const nameY = top + (component.stereotype === undefined ? 23 : 32);
 	const attributes = component.attributes
 		.map((row, index) => umlRow(row, left + 8, attributeSeparator + 17 + index * 16))
@@ -1064,7 +1023,9 @@ export function renderSchematic(
 	assertParsedSchematicDocument(document);
 	const normalized = normalizeCompileOptions(options);
 	const components = new Map(document.components.map((component) => [component.id, component]));
-	const routedConnections = routeConnections(document.connections, components, normalized.bounds);
+	const routedConnections =
+		parsedSchematicRoutes(document, normalized.bounds) ??
+		routeConnections(document.connections, components, normalized.bounds);
 	validateDocumentGeometry(document, normalized, routedConnections);
 	const signature = `${normalized.bounds.width}x${normalized.bounds.height}:${normalized.title}:${JSON.stringify(document)}`;
 	const candidatePrefix = (normalized.idPrefix ?? `schematic-${stableHash(signature)}`).replace(

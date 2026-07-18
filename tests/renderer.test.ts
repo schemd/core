@@ -134,9 +134,49 @@ describe('renderSchematic', () => {
 			renderSchematic(document, {
 				...fence,
 				mode: 'full',
+				semanticHooks: 'ports'
+			} as unknown as CompileSchematicOptions)
+		).toThrow('semanticHooks must be an array');
+		expect(() =>
+			renderSchematic(document, {
+				...fence,
+				mode: 'full',
 				semanticHooks: ['unknown']
 			} as unknown as CompileSchematicOptions)
 		).toThrow('semanticHooks may contain only');
+	});
+
+	test('renders every analog variant and a ports-only semantic payload', () => {
+		const variantFence = { bounds: { width: 1800, height: 320 }, title: 'Analog variants' };
+		const document = parseSchematic(
+			`inductor:L1 "Coil" at (90, 150) #amber
+diode:D0 "Standard" at (215, 150) #blue [type=standard]
+diode:D1 "Schottky" at (340, 150) #blue [type=schottky]
+diode:D2 "Zener" at (465, 150) #blue [type=zener]
+diode:D3 "LED" at (590, 150) #blue [type=led]
+transistor:Q0 "NPN" at (715, 150) #cyan [type=npn]
+transistor:Q1 "PNP" at (840, 150) #cyan [type=pnp]
+transistor:Q2 "NMOS" at (965, 150) #cyan [type=nmos]
+transistor:Q3 "PMOS" at (1090, 150) #cyan [type=pmos]
+ground:G0 "Signal" at (1215, 150) #slate [style=signal]
+ground:G1 "Earth" at (1340, 150) #slate [style=earth]
+ground:G2 "Chassis" at (1465, 150) #slate [style=chassis]
+port:P1 "Port" at (1590, 150) #purple
+ic:U1 "IC" at (1710, 150) #emerald [left="A" right="Y"]`,
+			variantFence
+		);
+		const html = renderSchematic(document, {
+			...variantFence,
+			mode: 'full',
+			semanticHooks: ['ports']
+		});
+		expect(html).toContain('data-port-id="anode"');
+		expect(html).not.toContain('data-node-id');
+		expect(html).not.toContain('data-wire-source');
+		expect(html).toContain('aria-label="D1, diode, Schottky, schottky"');
+		expect(html).toContain('aria-label="Q3, transistor, PMOS, pmos"');
+		expect(html).toContain('aria-label="G2, ground, Chassis, chassis"');
+		expect(html).toContain('aria-label="U1, ic, IC, 2 pins"');
 	});
 
 	test('keeps both interaction payloads measurably absent until requested', () => {

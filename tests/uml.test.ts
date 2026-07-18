@@ -73,6 +73,22 @@ describe('UML diagrams', () => {
 		expect(html).toContain('>Domain</text>');
 	});
 
+	test('uses micro-math consistently in UML rows and stereotypes', () => {
+		const mathDocument = parseSchematic(
+			`class:Math "Transfer" at (300, 180) #slate [stereotype="\\Delta" attributes="- impedance: \\Omega" operations="+ gain(x^2): \\infty"]
+state:Ready "Ready" at (720, 180) #blue [details="entry / f_c;do / e^{x^2}"]`,
+			fence
+		);
+		const html = renderSchematic(mathDocument, fence);
+		expect(html).toContain('«<tspan dy="0">Δ</tspan>»');
+		expect(html).toContain('- impedance: Ω');
+		expect(html).toContain('>+ gain(x</tspan><tspan dy="-0.55em"');
+		expect(html).toContain('): ∞</tspan>');
+		expect(html).toContain('>c</tspan>');
+		expect(html).not.toContain('\\Omega');
+		expect(html).not.toContain('\\infty');
+	});
+
 	test('derives every UML marker and dependency dash convention', () => {
 		const relationDocument = parseSchematic(
 			`class:A "A" at (220, 180) #slate

@@ -102,6 +102,8 @@ const MAX_ROUTER_STATES = 40_000;
 const ROUTER_BEND_PENALTY = 0.25;
 /** Spatial-hash cell size used to bound wire-crossing comparisons. */
 const CROSSING_BUCKET_SIZE = 64;
+/** Smallest bridge radius that survives three-decimal SVG serialization. */
+const MIN_RENDERABLE_BRIDGE_RADIUS = 0.001;
 
 /** Gap from upper geometry to the component designator baseline. */
 const DESIGNATOR_BASELINE_GAP = 10;
@@ -932,6 +934,24 @@ interface CachedObstacle {
 	readonly body: SchematicRectangle;
 }
 
+/** Whether aligned terminal normals point directly toward one another. */
+function endpointsFaceEachOther(
+	from: { readonly point: SchematicPoint; readonly normal: SchematicPoint },
+	to: { readonly point: SchematicPoint; readonly normal: SchematicPoint }
+): boolean {
+	const dx = to.point.x - from.point.x;
+	const dy = to.point.y - from.point.y;
+	if (dy === 0 && dx !== 0) {
+		const direction = Math.sign(dx);
+		return from.normal.x === direction && to.normal.x === -direction;
+	}
+	if (dx === 0 && dy !== 0) {
+		const direction = Math.sign(dy);
+		return from.normal.y === direction && to.normal.y === -direction;
+	}
+	return false;
+}
+
 /** Internal route implementation accepting document-scoped obstacle geometry. */
 function routeConnectionInternal(
 	connection: SchematicConnection,
@@ -965,6 +985,18 @@ function routeConnectionInternal(
 				expanded: componentObstacleRectangle(component),
 				body: componentObstacleRectangle(component, 0)
 			}));
+		if (
+			from.component.id !== to.component.id &&
+			endpointsFaceEachOther(from, to) &&
+			!obstacleCache.some(
+				(entry) =>
+					entry.id !== from.component.id &&
+					entry.id !== to.component.id &&
+					segmentIntersectsRectangle(start, end, entry.expanded)
+			)
+		) {
+			return { curve: 'ortho', d: orthogonalPath([start, end]), points: [start, end] };
+		}
 		const fromObstacle = componentObstacleRectangle(from.component);
 		const toObstacle = componentObstacleRectangle(to.component);
 		const escape = (
@@ -986,14 +1018,9 @@ function routeConnectionInternal(
 		});
 		const startEscape = escape(from, fromObstacle);
 		const endEscape = escape(to, toObstacle);
-		const obstacleEntries = obstacleCache.map((entry) => ({
-			id: entry.id,
-			rectangle:
-				entry.id === from.component.id || entry.id === to.component.id
-					? entry.body
-					: entry.expanded
-		}));
-		const obstacleRectangles = obstacleEntries.map((entry) => entry.rectangle);
+		const obstacleRectangle = (entry: CachedObstacle): SchematicRectangle =>
+			entry.id === from.component.id || entry.id === to.component.id ? entry.body : entry.expanded;
+		const obstacleRectangles = obstacleCache.map(obstacleRectangle);
 		const middle = routeBetweenEscapes(
 			startEscape,
 			endEscape,
@@ -1008,11 +1035,11 @@ function routeConnectionInternal(
 		for (let index = 1; index < points.length; index += 1) {
 			const allowFrom = index === 1;
 			const allowTo = index === points.length - 1;
-			for (const obstacle of obstacleEntries) {
+			for (const obstacle of obstacleCache) {
 				if (
 					!(allowFrom && obstacle.id === from.component.id) &&
 					!(allowTo && obstacle.id === to.component.id) &&
-					segmentIntersectsRectangle(points[index - 1]!, points[index]!, obstacle.rectangle)
+					segmentIntersectsRectangle(points[index - 1]!, points[index]!, obstacleRectangle(obstacle))
 				) {
 					throw new SchematicSyntaxError(
 						`Orthogonal route intersects ${obstacle.id} after routing.`,
@@ -1139,6 +1166,7 @@ function bridgedOrthogonalPath(
 			let cursorX = start.x;
 			for (const [crossingIndex, crossing] of segmentCrossings.entries()) {
 				const radius = radii[crossingIndex]!;
+				if (radius < MIN_RENDERABLE_BRIDGE_RADIUS) continue;
 				const before = crossing.x - direction * radius;
 				const after = crossing.x + direction * radius;
 				if (before !== cursorX) path += ` H ${formatNumber(before)}`;
@@ -1155,6 +1183,7 @@ function bridgedOrthogonalPath(
 			let cursorY = start.y;
 			for (const [crossingIndex, crossing] of segmentCrossings.entries()) {
 				const radius = radii[crossingIndex]!;
+				if (radius < MIN_RENDERABLE_BRIDGE_RADIUS) continue;
 				const before = crossing.y - direction * radius;
 				const after = crossing.y + direction * radius;
 				if (before !== cursorY) path += ` V ${formatNumber(before)}`;
@@ -1428,7 +1457,7 @@ export function validateDocumentGeometry(
 	document: SchematicDocument,
 	fence: SchematicFence,
 	routedConnections?: readonly RoutedConnection[]
-): void {
+): readonly RoutedConnection[] {
 	for (const component of document.components) {
 		if (!rectangleInsideBounds(componentRectangle(component), fence.bounds)) {
 			throw new SchematicSyntaxError(
@@ -1456,4 +1485,5 @@ export function validateDocumentGeometry(
 			);
 		}
 	}
+	return routes;
 }

@@ -45,6 +45,7 @@ import {
 } from './types.js';
 import { validateDocumentGeometry } from './layout.js';
 import { mathLabelTextWidth } from './math-label.js';
+import { cacheParsedSchematicRoutes } from './route-cache.js';
 import {
 	MAX_SCHEMATIC_COMPONENTS,
 	MAX_SCHEMATIC_CONNECTIONS,
@@ -1204,6 +1205,9 @@ export function parseSchematicFence(
 		throw new SchematicSyntaxError('Schematic bounds must be integers from 64 through 4096.');
 	}
 	const title = match[3] ?? defaultTitle;
+	if (title.trim() === '') {
+		throw new SchematicSyntaxError('Schematic titles cannot be empty.');
+	}
 	if (title.length > MAX_FENCE_TITLE_LENGTH) {
 		throw new SchematicSyntaxError('Schematic titles cannot exceed 512 characters.');
 	}
@@ -1264,6 +1268,8 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 		validateEndpoint(connection.to, componentsById, connection.line);
 	}
 	const document = { components, connections } satisfies SchematicDocument;
-	validateDocumentGeometry(document, fence);
-	return freezeParsedDocument(document);
+	const routes = validateDocumentGeometry(document, fence);
+	const parsedDocument = freezeParsedDocument(document);
+	cacheParsedSchematicRoutes(parsedDocument, fence.bounds, routes);
+	return parsedDocument;
 }

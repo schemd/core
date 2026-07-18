@@ -53,6 +53,14 @@ Class, actor, use-case, state, lifeline, note, package, initial, and final nodes
 
 Use `mode: "embedded-css"` for built-in styling or `mode: "full"` for interaction metadata. The default output stays compact and static.
 
+On a colored surface, set `--schematic-surface` to that background color so hollow UML markers and connector-label halos match it.
+
 Markdown belongs at the host boundary. Detect `schemd` fences in your server-side Markdown renderer and pass their text to `compileSchematic`; core does not ship or require a Markdown parser.
 
-[Documentation](https://johnowolabiidogun.dev/tools/schemd/docs/overview) · [Issues](https://github.com/Sirneij/schemd/issues) · [MIT](https://github.com/Sirneij/schemd/blob/main/LICENSE)
+## Roadmap
+
+**Now: topology and routing** → **Next: visual precision** → **Later: language and footprint**
+
+Known limits and contributor-sized work live in the [active roadmap](./ROADMAP.md). Pick an item, open its claim link, and agree on the approach before starting a large change. Completed items are removed after merge.
+
+[Documentation](https://johnowolabiidogun.dev/tools/schemd/docs/overview) · [Roadmap](./ROADMAP.md) · [Issues](https://github.com/Sirneij/schemd/issues) · [MIT](https://github.com/Sirneij/schemd/blob/main/LICENSE)

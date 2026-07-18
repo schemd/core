@@ -50,6 +50,9 @@ describe('parseSchematicFence', () => {
 
 	test('rejects missing metadata and each invalid bounds boundary', () => {
 		expect(() => parseSchematicFence('schemd')).toThrow(/require/);
+		expect(() => parseSchematicFence('schemd bounds="640x260"', '   ')).toThrow(
+			/titles cannot be empty/
+		);
 		for (const info of [
 			'schemd bounds="63x100"',
 			'schemd bounds="100x63"',
