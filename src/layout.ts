@@ -10,17 +10,24 @@
  */
 import {
 	CLASSICAL_GATE_KINDS,
+	DIGITAL_COMPONENT_KINDS,
+	QUANTUM_SPECIAL_KINDS,
 	UML_COMPONENT_KINDS,
 	SchematicSyntaxError,
 	type ClassicalGateComponent,
+	type DigitalComponent,
 	type IntegratedCircuitComponent,
+	type QuantumGateComponent,
+	type QuantumSpecialComponent,
 	type SchematicBounds,
 	type SchematicComponent,
 	type SchematicConnection,
 	type SchematicDocument,
 	type SchematicEndpoint,
 	type SchematicFence,
+	type SchematicOrientation,
 	type SchematicPoint,
+	type SchematicQuarterTurn,
 	type UmlComponent
 } from './types.js';
 import { mathLabelTextWidth } from './math-label.js';
@@ -36,6 +43,14 @@ export interface SchematicRectangle {
 	maxX: number;
 	/** Inclusive bottom extent. */
 	maxY: number;
+}
+
+/** Axis-aligned half-extents around a component origin. */
+export interface SchematicHalfExtents {
+	/** Non-negative horizontal distance from the origin to either side. */
+	halfWidth: number;
+	/** Non-negative vertical distance from the origin to either side. */
+	halfHeight: number;
 }
 
 /** Render-ready connection path and the points used for bounds validation. */
@@ -95,6 +110,112 @@ export const SCHEMATIC_OBSTACLE_CLEARANCE = 12;
 
 /** Radius of the engineering crossover arc inserted at non-junction wire crossings. */
 export const SCHEMATIC_BRIDGE_RADIUS = 5;
+
+/**
+ * Normalize the public direction vocabulary to a compact clockwise quarter turn.
+ *
+ * @param orientation - Validated author-facing orientation.
+ * @returns Zero for right, one for down, two for left, or three for up.
+ */
+export function orientationQuarterTurn(
+	orientation: SchematicOrientation
+): SchematicQuarterTurn {
+	switch (orientation) {
+		case 'right':
+			return 0;
+		case 'down':
+			return 1;
+		case 'left':
+			return 2;
+		case 'up':
+			return 3;
+	}
+}
+
+/** Normalize an integer sum to the closed set of supported quarter turns. */
+function normalizedQuarterTurn(value: number): SchematicQuarterTurn {
+	switch (value & 3) {
+		case 0:
+			return 0;
+		case 1:
+			return 1;
+		case 2:
+			return 2;
+		default:
+			return 3;
+	}
+}
+
+/**
+ * Compose two clockwise quarter turns without floating-point angle arithmetic.
+ *
+ * @param first - Turn applied first.
+ * @param second - Turn applied second.
+ * @returns Canonical combined turn modulo four.
+ */
+export function composeQuarterTurns(
+	first: SchematicQuarterTurn,
+	second: SchematicQuarterTurn
+): SchematicQuarterTurn {
+	return normalizedQuarterTurn(first + second);
+}
+
+/** Return the exact quarter turn that reverses the supplied rotation. */
+export function inverseQuarterTurn(turn: SchematicQuarterTurn): SchematicQuarterTurn {
+	return normalizedQuarterTurn(4 - turn);
+}
+
+/** Negate one coordinate while canonicalizing both positive and negative zero. */
+function negatedCoordinate(value: number): number {
+	return value === 0 ? 0 : -value;
+}
+
+/** Canonicalize negative zero without otherwise rounding a coordinate. */
+function canonicalCoordinate(value: number): number {
+	return value === 0 ? 0 : value;
+}
+
+/**
+ * Rotate a local point or unit vector clockwise around the origin using only
+ * coordinate swaps and sign changes.
+ *
+ * @param point - Local coordinate or vector.
+ * @param turn - Clockwise quarter-turn count.
+ * @returns Newly allocated exact coordinate with no negative zero.
+ */
+export function rotateQuarterPoint(
+	point: SchematicPoint,
+	turn: SchematicQuarterTurn
+): SchematicPoint {
+	switch (turn) {
+		case 0:
+			return { x: canonicalCoordinate(point.x), y: canonicalCoordinate(point.y) };
+		case 1:
+			return { x: negatedCoordinate(point.y), y: canonicalCoordinate(point.x) };
+		case 2:
+			return { x: negatedCoordinate(point.x), y: negatedCoordinate(point.y) };
+		case 3:
+			return { x: canonicalCoordinate(point.y), y: negatedCoordinate(point.x) };
+	}
+}
+
+/**
+ * Rotate axis-aligned half-extents; odd turns swap axes and even turns retain them.
+ *
+ * @param extents - Canonical unrotated component half-extents.
+ * @param turn - Clockwise quarter-turn count.
+ * @returns Exact axis-aligned extents of the rotated component.
+ */
+export function rotateQuarterExtents(
+	extents: SchematicHalfExtents,
+	turn: SchematicQuarterTurn
+): SchematicHalfExtents {
+	const halfWidth = canonicalCoordinate(extents.halfWidth);
+	const halfHeight = canonicalCoordinate(extents.halfHeight);
+	return turn === 1 || turn === 3
+		? { halfWidth: halfHeight, halfHeight: halfWidth }
+		: { halfWidth, halfHeight };
+}
 
 /** Hard ceiling for the sparse fallback router's expanded search states. */
 const MAX_ROUTER_STATES = 40_000;
@@ -166,6 +287,23 @@ export function classicalGateHeight(component: ClassicalGateComponent): number {
 	return Math.max(48, Math.max(component.inputs, component.outputs) * 16);
 }
 
+/** Deterministic shared shell dimensions for native and custom single-qubit gates. */
+export function quantumGateDimensions(component: QuantumGateComponent): {
+	bodyWidth: number;
+	bodyHeight: number;
+	stubExtent: number;
+} {
+	const details = [component.parameter, component.phase, component.matrix].filter(
+		(value): value is string => value !== undefined
+	);
+	let widest = 16;
+	if (details.length > 0 && component.kind === 'qgate') widest = mathLabelTextWidth(component.label, 8);
+	for (const detail of details) widest = Math.max(widest, mathLabelTextWidth(detail, 7));
+	const bodyWidth = Math.max(50, Math.min(104, widest + 20));
+	const bodyHeight = 50 + details.length * 15;
+	return { bodyWidth, bodyHeight, stubExtent: bodyWidth / 2 + 23 };
+}
+
 /**
  * Narrow any component to the classical-gate union.
  *
@@ -176,26 +314,101 @@ function isClassicalGate(component: SchematicComponent): component is ClassicalG
 	return CLASSICAL_GATE_KINDS.includes(component.kind as ClassicalGateComponent['kind']);
 }
 
+function isDigitalComponent(component: SchematicComponent): component is DigitalComponent {
+	return DIGITAL_COMPONENT_KINDS.includes(component.kind as DigitalComponent['kind']);
+}
+
+function isQuantumSpecial(
+	component: SchematicComponent
+): component is QuantumSpecialComponent {
+	return QUANTUM_SPECIAL_KINDS.includes(component.kind as QuantumSpecialComponent['kind']);
+}
+
 /** Narrow a schematic component to a first-class UML node. */
 function isUmlComponent(component: SchematicComponent): component is UmlComponent {
 	return UML_COMPONENT_KINDS.includes(component.kind as UmlComponent['kind']);
+}
+
+/** Return the exact canonical turn stored by any direction-sensitive component. */
+function componentTurn(component: SchematicComponent): SchematicQuarterTurn {
+	return 'orientation' in component && component.orientation !== undefined
+		? orientationQuarterTurn(component.orientation)
+		: 0;
+}
+
+/** Rotate a canonical local coordinate and translate it to the component origin. */
+function positionedQuarterPoint(
+	component: SchematicComponent,
+	local: SchematicPoint
+): SchematicPoint {
+	const rotated = rotateQuarterPoint(local, componentTurn(component));
+	return { x: component.x + rotated.x, y: component.y + rotated.y };
+}
+
+/** Rotate an outward normal through the owning component's orientation. */
+function positionedQuarterNormal(
+	component: SchematicComponent,
+	normal: SchematicPoint
+): SchematicPoint {
+	return rotateQuarterPoint(normal, componentTurn(component));
 }
 
 /** Physical UML body half-extents, including actor and pseudostate figures. */
 function umlHalfExtents(component: UmlComponent): { halfWidth: number; halfHeight: number } {
 	switch (component.kind) {
 		case 'class':
+		case 'interface':
+		case 'enumeration':
+		case 'datatype':
+		case 'object':
 		case 'state':
 		case 'usecase':
 		case 'lifeline':
 		case 'note':
 		case 'package':
+		case 'component':
+		case 'artifact':
+		case 'node':
+		case 'device':
+		case 'execution':
+		case 'system':
+		case 'action':
+		case 'object-node':
+		case 'partition':
+		case 'activation':
+		case 'fragment':
+		case 'interaction':
+		case 'region':
 			return { halfWidth: component.bodyWidth / 2, halfHeight: component.bodyHeight / 2 };
 		case 'actor':
 			return { halfWidth: 24, halfHeight: 50 };
 		case 'initial':
 		case 'final':
+		case 'activity-final':
+		case 'flow-final':
+		case 'provided-interface':
+		case 'required-interface':
+		case 'component-port':
+		case 'destruction':
+		case 'gate':
+		case 'found':
+		case 'lost':
+		case 'state-junction':
+		case 'history':
+		case 'entry':
+		case 'exit':
+		case 'terminate':
 			return { halfWidth: 12, halfHeight: 12 };
+		case 'decision':
+		case 'merge':
+		case 'choice':
+			return { halfWidth: 18, halfHeight: 18 };
+		case 'fork':
+		case 'join':
+			return { halfWidth: 38, halfHeight: 5 };
+		case 'send-signal':
+		case 'receive-signal':
+			return { halfWidth: 22, halfHeight: 15 };
 	}
 }
 
@@ -233,10 +446,10 @@ function indexedPortPoint(component: ClassicalGateComponent, port: string): Sche
 	const count = output ? component.outputs : component.inputs;
 	const suffix = port.match(/\d+$/)?.[0];
 	const index = suffix === undefined ? 0 : Number(suffix) - 1;
-	return {
-		x: component.x + (output ? 48 : -48),
-		y: component.y + distributedCoordinate(index, count, classicalGateHeight(component))
-	};
+	return positionedQuarterPoint(component, {
+		x: output ? 48 : -48,
+		y: distributedCoordinate(index, count, classicalGateHeight(component))
+	});
 }
 
 /**
@@ -257,20 +470,19 @@ export function positionIcPin(
 	if (!Number.isInteger(index) || index < 0 || index >= pins.length) {
 		throw new RangeError(`IC pin index ${index} is outside ${component.id}.${side}.`);
 	}
+	let local: SchematicPoint;
 	if (side === 'left' || side === 'right') {
-		return {
-			x:
-				component.x +
-				(side === 'left' ? -component.bodyWidth / 2 - 16 : component.bodyWidth / 2 + 16),
-			y: component.y + distributedCoordinate(index, pins.length, component.bodyHeight)
+		local = {
+			x: side === 'left' ? -component.bodyWidth / 2 - 16 : component.bodyWidth / 2 + 16,
+			y: distributedCoordinate(index, pins.length, component.bodyHeight)
+		};
+	} else {
+		local = {
+			x: distributedCoordinate(index, pins.length, component.bodyWidth),
+			y: side === 'top' ? -component.bodyHeight / 2 - 16 : component.bodyHeight / 2 + 16
 		};
 	}
-	return {
-		x: component.x + distributedCoordinate(index, pins.length, component.bodyWidth),
-		y:
-			component.y +
-			(side === 'top' ? -component.bodyHeight / 2 - 16 : component.bodyHeight / 2 + 16)
-	};
+	return positionedQuarterPoint(component, local);
 }
 
 /** Resolve one IC pin to both its side and physical coordinate. */
@@ -334,52 +546,158 @@ export function resolvePortPoint(component: SchematicComponent, port: string): S
 		if (point !== undefined) return point;
 		throw new Error(`Validated port ${component.id}.${port} is missing.`);
 	}
-	const left = { x: component.x - 42, y: component.y };
-	const right = { x: component.x + 42, y: component.y };
+	if (component.kind === 'ic') {
+		const location = icPinLocation(component, port);
+		if (location !== undefined) return location.point;
+		throw new Error(`Validated port ${component.id}.${port} is missing.`);
+	}
+	let local: SchematicPoint | undefined;
+	const left = { x: -42, y: 0 };
+	const right = { x: 42, y: 0 };
 	switch (component.kind) {
 		case 'resistor':
 		case 'capacitor':
 		case 'inductor':
-			if (PASSIVE_INPUT_PORTS.has(port)) return left;
-			if (PASSIVE_OUTPUT_PORTS.has(port)) return right;
+			if (PASSIVE_INPUT_PORTS.has(port)) local = left;
+			if (PASSIVE_OUTPUT_PORTS.has(port)) local = right;
 			break;
 		case 'diode':
-			if (DIODE_ANODE_PORTS.has(port)) return left;
-			if (DIODE_CATHODE_PORTS.has(port)) return right;
+			if (DIODE_ANODE_PORTS.has(port)) local = left;
+			if (DIODE_CATHODE_PORTS.has(port)) local = right;
 			break;
 		case 'transistor':
-			if (TRANSISTOR_CONTROL_PORTS.has(port)) return left;
-			if (TRANSISTOR_UPPER_PORTS.has(port)) {
-				return { x: component.x + 42, y: component.y - 22 };
-			}
-			if (TRANSISTOR_LOWER_PORTS.has(port)) {
-				return { x: component.x + 42, y: component.y + 22 };
-			}
+			if (TRANSISTOR_CONTROL_PORTS.has(port)) local = left;
+			if (TRANSISTOR_UPPER_PORTS.has(port)) local = { x: 42, y: -22 };
+			if (TRANSISTOR_LOWER_PORTS.has(port)) local = { x: 42, y: 22 };
 			break;
 		case 'port':
-			if (port === 'in') return left;
-			if (port === 'out') return right;
+			if (port === 'in') local = left;
+			if (port === 'out') local = right;
 			break;
 		case 'ground':
-			if (port === 'in') return { x: component.x, y: component.y - 42 };
+			if (port === 'in') local = { x: 0, y: -42 };
 			break;
 		case 'hadamard':
 		case 'qgate':
-			if (port === 'in') return { x: component.x - 48, y: component.y };
-			if (port === 'out') return { x: component.x + 48, y: component.y };
+		case 'xgate':
+		case 'ygate':
+		case 'zgate':
+		case 'sgate':
+		case 'sdg':
+		case 'tgate':
+		case 'tdg':
+		case 'sx':
+		case 'phase':
+		case 'rx':
+		case 'ry':
+		case 'rz':
+		case 'ugate':
+			if (port === 'in') local = { x: -quantumGateDimensions(component).stubExtent, y: 0 };
+			if (port === 'out') local = { x: quantumGateDimensions(component).stubExtent, y: 0 };
 			break;
 		case 'cnot':
-			if (port === 'in') return left;
-			if (port === 'out') return right;
-			if (port === 'control') return { x: component.x, y: component.y - 16 };
-			if (port === 'target') return { x: component.x, y: component.y + 16 };
+			if (port === 'in') local = left;
+			if (port === 'out') local = right;
+			if (port === 'control') local = { x: 0, y: -16 };
+			if (port === 'target') local = { x: 0, y: 16 };
 			break;
-		case 'ic': {
-			const location = icPinLocation(component, port);
-			if (location !== undefined) return location.point;
+		case 'junction':
+		case 'testpoint':
+			local = { x: 0, y: 0 };
+			break;
+		case 'connector':
+			local = port === 'out' ? { x: 32, y: 0 } : { x: -32, y: 0 };
+			break;
+		case 'source':
+			if (port === 'in' || port === 'negative') local = left;
+			else if (port === 'out' || port === 'positive') local = right;
+			else local = { x: 0, y: port === 'control-positive' ? -34 : 34 };
+			break;
+		case 'power':
+			local = { x: -32, y: 0 };
+			break;
+		case 'switch':
+			if (port === 'in' || port === 'common') local = left;
+			else if (port === 'normally-open') local = { x: 42, y: -12 };
+			else if (port === 'normally-closed') local = { x: 42, y: 12 };
+			else if (port === 'coil1') local = { x: -12, y: 34 };
+			else if (port === 'coil2') local = { x: 12, y: 34 };
+			else local = right;
+			break;
+		case 'amplifier':
+			if (port === 'out') local = { x: 48, y: 0 };
+			else if (port === 'v+') local = { x: 0, y: -36 };
+			else if (port === 'v-') local = { x: 0, y: 36 };
+			else local = { x: -48, y: port === 'negative' ? 13 : -13 };
+			break;
+		case 'protection':
+		case 'resonator':
+		case 'meter':
+		case 'load':
+			local = port === 'out' ? right : left;
+			break;
+		case 'buffer':
+		case 'logic':
+		case 'clock':
+		case 'flipflop':
+		case 'mux':
+		case 'encoder':
+		case 'decoder':
+		case 'register':
+		case 'counter':
+		case 'adder':
+		case 'comparator':
+		case 'bus': {
+			const output = port === 'out' || port.startsWith('out') || ['q', 'nq', 'gt', 'eq', 'lt', 'tap'].includes(port) || (component.kind === 'bus' && component.variant === 'joiner' && port === 'bus');
+			const match = port.match(/\d+$/);
+			const count = output ? component.outputs : component.inputs;
+			const index = match === null ? 0 : Number(match[0]) - 1;
+			if (port === 'clock' || port === 'enable' || port === 'select') local = { x: 0, y: component.bodyHeight / 2 + 16 };
+			else if (port === 'preset' || port === 'clear') local = { x: 0, y: -component.bodyHeight / 2 - 16 };
+			else local = {
+				x: (output ? 1 : -1) * (component.bodyWidth / 2 + 16),
+				y: distributedCoordinate(index, Math.max(1, count), component.bodyHeight)
+			};
 			break;
 		}
+		case 'measure':
+			if (port === 'classical') local = { x: 0, y: 34 };
+			else local = port === 'out' ? { x: 40, y: 0 } : { x: -40, y: 0 };
+			break;
+		case 'prepare':
+			local = { x: 40, y: 0 };
+			break;
+		case 'control':
+			local = port === 'control' ? { x: 0, y: 0 } : port === 'out' ? right : left;
+			break;
+		case 'reset':
+		case 'classical-bit':
+		case 'classical-register':
+			local = port === 'out' ? { x: 40, y: 0 } : { x: -40, y: 0 };
+			break;
+		case 'swap':
+		case 'cz':
+		case 'cphase':
+		case 'toffoli':
+		case 'controlled':
+		case 'barrier':
+		case 'delay': {
+			const indexed = port.match(/^(?:in|out|control|target)([1-9]\d*)$/);
+			let index = indexed === null ? 0 : Number(indexed[1]) - 1;
+			if (port.startsWith('target')) index += component.controls;
+			const tracks = Math.max(component.wires, component.controls + component.targets);
+			if (port.startsWith('control') || port.startsWith('target')) {
+				local = { x: 0, y: distributedCoordinate(index, Math.max(1, tracks), Math.max(16, (tracks - 1) * 18)) };
+			} else {
+				local = {
+					x: port.startsWith('out') ? 42 : -42,
+					y: distributedCoordinate(index, Math.max(1, tracks), Math.max(16, (tracks - 1) * 18))
+				};
+			}
+				break;
+			}
 	}
+	if (local !== undefined) return positionedQuarterPoint(component, local);
 	throw new Error(`Validated port ${component.id}.${port} is missing.`);
 }
 
@@ -390,7 +708,10 @@ export function resolvePortGeometry(
 ): { readonly point: SchematicPoint; readonly normal: SchematicPoint } {
 	const point = resolvePortPoint(component, port);
 	if (isClassicalGate(component)) {
-		return { point, normal: port.startsWith('out') ? { x: 1, y: 0 } : { x: -1, y: 0 } };
+		return {
+			point,
+			normal: positionedQuarterNormal(component, port.startsWith('out') ? { x: 1, y: 0 } : { x: -1, y: 0 })
+		};
 	}
 	if (isUmlComponent(component)) {
 		if (port === 'left' || port === 'in' || port.startsWith('left')) {
@@ -401,38 +722,96 @@ export function resolvePortGeometry(
 		}
 		return { point, normal: port === 'top' ? { x: 0, y: -1 } : { x: 0, y: 1 } };
 	}
+	const geometry = (normal: SchematicPoint) => ({
+		point,
+		normal: positionedQuarterNormal(component, normal)
+	});
 	switch (component.kind) {
 		case 'resistor':
 		case 'capacitor':
 		case 'inductor':
-			return {
-				point,
-				normal: PASSIVE_OUTPUT_PORTS.has(port) ? { x: 1, y: 0 } : { x: -1, y: 0 }
-			};
+			return geometry(PASSIVE_OUTPUT_PORTS.has(port) ? { x: 1, y: 0 } : { x: -1, y: 0 });
 		case 'diode':
-			return {
-				point,
-				normal: DIODE_CATHODE_PORTS.has(port) ? { x: 1, y: 0 } : { x: -1, y: 0 }
-			};
+			return geometry(DIODE_CATHODE_PORTS.has(port) ? { x: 1, y: 0 } : { x: -1, y: 0 });
 		case 'transistor':
-			return {
-				point,
-				normal: TRANSISTOR_CONTROL_PORTS.has(port) ? { x: -1, y: 0 } : { x: 1, y: 0 }
-			};
+			return geometry(TRANSISTOR_CONTROL_PORTS.has(port) ? { x: -1, y: 0 } : { x: 1, y: 0 });
 		case 'port':
 		case 'hadamard':
 		case 'qgate':
-			return { point, normal: port === 'out' ? { x: 1, y: 0 } : { x: -1, y: 0 } };
+		case 'xgate':
+		case 'ygate':
+		case 'zgate':
+		case 'sgate':
+		case 'sdg':
+		case 'tgate':
+		case 'tdg':
+		case 'sx':
+		case 'phase':
+		case 'rx':
+		case 'ry':
+		case 'rz':
+		case 'ugate':
+		case 'connector':
+		case 'protection':
+		case 'resonator':
+		case 'meter':
+		case 'load':
+		case 'reset':
+		case 'prepare':
+		case 'classical-bit':
+		case 'classical-register':
+			return geometry(port === 'out' ? { x: 1, y: 0 } : { x: -1, y: 0 });
 		case 'ground':
-			return { point, normal: { x: 0, y: -1 } };
+			return geometry({ x: 0, y: -1 });
 		case 'cnot':
-			if (port === 'control') return { point, normal: { x: 0, y: -1 } };
-			if (port === 'target') return { point, normal: { x: 0, y: 1 } };
-			return { point, normal: port === 'out' ? { x: 1, y: 0 } : { x: -1, y: 0 } };
+			if (port === 'control') return geometry({ x: 0, y: -1 });
+			if (port === 'target') return geometry({ x: 0, y: 1 });
+			return geometry(port === 'out' ? { x: 1, y: 0 } : { x: -1, y: 0 });
 		case 'ic': {
 			const location = icPinLocation(component, port)!;
-			return { point, normal: sideNormal(location.side) };
+			return geometry(sideNormal(location.side));
 		}
+		case 'junction':
+		case 'testpoint':
+			return geometry(port === 'out' ? { x: 1, y: 0 } : { x: -1, y: 0 });
+		case 'source':
+			if (port.startsWith('control-')) return geometry({ x: 0, y: port.endsWith('positive') ? -1 : 1 });
+			return geometry(port === 'out' || port === 'positive' ? { x: 1, y: 0 } : { x: -1, y: 0 });
+		case 'power':
+			return geometry({ x: -1, y: 0 });
+		case 'switch':
+			if (port.startsWith('coil')) return geometry({ x: 0, y: 1 });
+			return geometry(port === 'in' || port === 'common' ? { x: -1, y: 0 } : { x: 1, y: 0 });
+		case 'amplifier':
+			if (port === 'v+' || port === 'v-') return geometry({ x: 0, y: port === 'v+' ? -1 : 1 });
+			return geometry(port === 'out' ? { x: 1, y: 0 } : { x: -1, y: 0 });
+		case 'buffer':
+		case 'logic':
+		case 'clock':
+		case 'flipflop':
+		case 'mux':
+		case 'encoder':
+		case 'decoder':
+		case 'register':
+		case 'counter':
+		case 'adder':
+		case 'comparator':
+		case 'bus':
+			if (['clock', 'enable', 'select'].includes(port)) return geometry({ x: 0, y: 1 });
+			if (['preset', 'clear'].includes(port)) return geometry({ x: 0, y: -1 });
+			return geometry(port === 'out' || port.startsWith('out') || ['q', 'nq', 'gt', 'eq', 'lt', 'tap'].includes(port) || (component.kind === 'bus' && component.variant === 'joiner' && port === 'bus') ? { x: 1, y: 0 } : { x: -1, y: 0 });
+		case 'measure':
+			return geometry(port === 'classical' ? { x: 0, y: 1 } : port === 'out' ? { x: 1, y: 0 } : { x: -1, y: 0 });
+		case 'control':
+			return geometry(port === 'control' ? { x: 0, y: -1 } : port === 'out' ? { x: 1, y: 0 } : { x: -1, y: 0 });
+		case 'swap':
+		case 'cz':
+		case 'cphase':
+		case 'toffoli':
+		case 'controlled':
+		case 'barrier':
+		case 'delay':
+			return geometry(port.startsWith('out') ? { x: 1, y: 0 } : port.startsWith('in') ? { x: -1, y: 0 } : { x: 0, y: -1 });
 	}
 	/* v8 ignore next -- resolvePortPoint proves the discriminated port cases above. */
 	throw new Error(`Validated port ${port} is missing.`);
@@ -467,6 +846,39 @@ export function enumerateComponentPorts(component: SchematicComponent): readonly
 			)
 		];
 	}
+	if (isDigitalComponent(component)) {
+		let ports = [
+			...Array.from({ length: component.inputs }, (_, index) => `in${index + 1}`),
+			...Array.from({ length: component.outputs }, (_, index) => `out${index + 1}`)
+		];
+		if (component.kind === 'logic' || component.kind === 'clock') ports = ['out'];
+		else if (component.kind === 'flipflop') {
+			const inputs = component.variant === 'jk' ? ['j', 'k', 'clock'] : component.variant === 't' ? ['t', 'clock', 'clear'] : component.variant === 'sr-latch' ? ['s', 'r', 'enable'] : ['d', 'clock', 'clear'];
+			ports = [...inputs, 'q', 'nq', 'preset'];
+		} else if (component.kind === 'register') ports = ['in', 'out', 'clock', 'enable', 'clear'];
+		else if (component.kind === 'counter') ports.push('clock', 'enable', 'clear');
+		else if (component.kind === 'mux') ports.push('select', 'enable');
+		else if (component.kind === 'comparator') ports = ['in1', 'in2', 'gt', 'eq', 'lt'];
+		else if (component.kind === 'bus') {
+			ports = component.variant === 'tap' ? ['bus', 'tap'] : component.variant === 'joiner' ? [...Array.from({ length: component.inputs }, (_, index) => `in${index + 1}`), 'bus'] : ['bus', ...Array.from({ length: component.outputs }, (_, index) => `out${index + 1}`)];
+		} else if (component.kind === 'buffer' && component.variant?.startsWith('tristate') === true) ports.push('enable');
+		return ports.map((port) => namedPort(component, port));
+	}
+	if (isQuantumSpecial(component)) {
+		if (component.kind === 'prepare') return [namedPort(component, 'out')];
+		if (component.kind === 'measure') return ['in', 'out', 'classical'].map((port) => namedPort(component, port));
+		if (component.kind === 'control') return ['in', 'out', 'control'].map((port) => namedPort(component, port));
+		if (component.kind === 'reset' || component.kind === 'classical-bit' || component.kind === 'classical-register') {
+			return ['in', 'out'].map((port) => namedPort(component, port));
+		}
+		const tracks = Math.max(component.wires, component.controls + component.targets);
+		return [
+			...Array.from({ length: tracks }, (_, index) => namedPort(component, `in${index + 1}`)),
+			...Array.from({ length: tracks }, (_, index) => namedPort(component, `out${index + 1}`)),
+			...Array.from({ length: component.controls }, (_, index) => namedPort(component, `control${index + 1}`)),
+			...Array.from({ length: component.targets }, (_, index) => namedPort(component, `target${index + 1}`))
+		];
+	}
 	if (isUmlComponent(component)) {
 		return ['left', 'right', 'top', 'bottom'].map((port) => namedPort(component, port));
 	}
@@ -477,6 +889,24 @@ export function enumerateComponentPorts(component: SchematicComponent): readonly
 		case 'port':
 		case 'hadamard':
 		case 'qgate':
+		case 'xgate':
+		case 'ygate':
+		case 'zgate':
+		case 'sgate':
+		case 'sdg':
+		case 'tgate':
+		case 'tdg':
+		case 'sx':
+		case 'phase':
+		case 'rx':
+		case 'ry':
+		case 'rz':
+		case 'ugate':
+		case 'connector':
+		case 'protection':
+		case 'resonator':
+		case 'meter':
+		case 'load':
 			return [namedPort(component, 'in'), namedPort(component, 'out')];
 		case 'diode':
 			return [namedPort(component, 'anode'), namedPort(component, 'cathode')];
@@ -503,13 +933,35 @@ export function enumerateComponentPorts(component: SchematicComponent): readonly
 				namedPort(component, 'control'),
 				namedPort(component, 'target')
 			];
+		case 'junction':
+		case 'testpoint':
+			return [namedPort(component, 'node')];
+		case 'source': {
+			const ports = ['negative', 'positive'];
+			if (component.variant !== undefined && ['vcvs', 'vccs', 'ccvs', 'cccs'].includes(component.variant)) {
+				ports.push('control-positive', 'control-negative');
+			}
+			return ports.map((port) => namedPort(component, port));
+		}
+		case 'power':
+			return [namedPort(component, 'in')];
+		case 'switch': {
+			const ports = component.variant === 'spdt'
+				? ['common', 'normally-open', 'normally-closed']
+				: component.variant === 'relay'
+					? ['in', 'out', 'coil1', 'coil2']
+					: ['in', 'out'];
+			return ports.map((port) => namedPort(component, port));
+		}
+		case 'amplifier':
+			return ['positive', 'negative', 'out', 'v+', 'v-'].map((port) => namedPort(component, port));
 		case 'ic': {
 			const sides = ['left', 'right', 'top', 'bottom'] as const;
 			return sides.flatMap((side) =>
 				component.pins[side].map((id, index) => ({
 					id,
 					point: positionIcPin(component, side, index),
-					normal: sideNormal(side)
+					normal: positionedQuarterNormal(component, sideNormal(side))
 				}))
 			);
 		}
@@ -1316,6 +1768,14 @@ function componentHalfExtents(component: SchematicComponent): {
 		halfHeight = classicalGateHeight(component) / 2;
 	} else if (isUmlComponent(component)) {
 		return umlHalfExtents(component);
+	} else if (isDigitalComponent(component)) {
+		halfWidth = component.bodyWidth / 2 + 16;
+		halfHeight = component.bodyHeight / 2 + 16;
+	} else if (isQuantumSpecial(component)) {
+		const tracks = Math.max(component.wires, component.controls + component.targets);
+		halfWidth = 42;
+		halfHeight = Math.max(24, (tracks - 1) * 9 + 14);
+		if (component.kind === 'measure') halfHeight = 34;
 	} else {
 		switch (component.kind) {
 			case 'resistor':
@@ -1326,7 +1786,7 @@ function componentHalfExtents(component: SchematicComponent): {
 				break;
 			case 'diode':
 				halfWidth = 42;
-				halfHeight = component.diodeType === 'led' ? 30 : 20;
+				halfHeight = component.diodeType === 'led' || component.diodeType === 'photodiode' ? 30 : 20;
 				break;
 			case 'transistor':
 				halfWidth = 42;
@@ -1342,9 +1802,24 @@ function componentHalfExtents(component: SchematicComponent): {
 				break;
 			case 'hadamard':
 			case 'qgate':
-				halfWidth = 48;
-				halfHeight = 30;
+			case 'xgate':
+			case 'ygate':
+			case 'zgate':
+			case 'sgate':
+			case 'sdg':
+			case 'tgate':
+			case 'tdg':
+			case 'sx':
+			case 'phase':
+			case 'rx':
+			case 'ry':
+			case 'rz':
+			case 'ugate': {
+				const dimensions = quantumGateDimensions(component);
+				halfWidth = dimensions.stubExtent;
+				halfHeight = dimensions.bodyHeight / 2;
 				break;
+			}
 			case 'cnot':
 				halfWidth = 42;
 				halfHeight = 26;
@@ -1353,9 +1828,39 @@ function componentHalfExtents(component: SchematicComponent): {
 				halfWidth = component.bodyWidth / 2 + 16;
 				halfHeight = component.bodyHeight / 2 + 16;
 				break;
+			case 'source':
+				halfWidth = 42;
+				halfHeight = 34;
+				break;
+			case 'junction':
+				halfWidth = halfHeight = 5;
+				break;
+			case 'testpoint':
+				halfWidth = halfHeight = 12;
+				break;
+			case 'connector':
+			case 'power':
+				halfWidth = 32;
+				halfHeight = 18;
+				break;
+			case 'switch':
+				halfWidth = 42;
+				halfHeight = component.variant === 'relay' ? 34 : 20;
+				break;
+			case 'amplifier':
+				halfWidth = 48;
+				halfHeight = 36;
+				break;
+			case 'protection':
+			case 'resonator':
+			case 'meter':
+			case 'load':
+				halfWidth = 42;
+				halfHeight = 24;
+				break;
 		}
 	}
-	return { halfWidth, halfHeight };
+	return rotateQuarterExtents({ halfWidth, halfHeight }, componentTurn(component));
 }
 
 /**

@@ -9,14 +9,35 @@
  * @packageDocumentation
  */
 import {
+	ADDER_TYPES,
+	AMPLIFIER_TYPES,
 	ANALOG_KINDS,
+	BUFFER_TYPES,
+	BUS_TYPES,
 	CLASSICAL_GATE_KINDS,
 	COMPONENT_KINDS,
+	DIGITAL_COMPONENT_KINDS,
 	DIODE_TYPES,
+	ELECTRICAL_COMPONENT_KINDS,
+	FLIPFLOP_TYPES,
 	GROUND_STYLES,
+	LOAD_TYPES,
+	LOGIC_STATES,
+	METER_TYPES,
+	MUX_TYPES,
+	NAMED_QUANTUM_GATE_KINDS,
 	PASSIVE_KINDS,
+	POWER_TYPES,
+	PROTECTION_TYPES,
+	QUANTUM_GATE_KINDS,
+	QUANTUM_SPECIAL_KINDS,
+	RESONATOR_TYPES,
+	SCHEMATIC_ORIENTATIONS,
+	SCHEMATIC_SIGNAL_KINDS,
 	SEMANTIC_COLORS,
 	SCHEMATIC_SIGNAL_MARKERS,
+	SOURCE_TYPES,
+	SWITCH_TYPES,
 	TRANSISTOR_TYPES,
 	UML_COMPONENT_KINDS,
 	UML_RELATION_KINDS,
@@ -24,12 +45,14 @@ import {
 	type ClassicalGateComponent,
 	type ComponentKind,
 	type DiodeComponent,
+	type DigitalComponent,
+	type ElectricalComponent,
 	type GroundComponent,
 	type IcComponent,
 	type IntegratedCircuitPins,
 	type PortComponent,
 	type QuantumGateComponent,
-	type QuantumGateKind,
+	type QuantumSpecialComponent,
 	type SchematicColor,
 	type SchematicComponent,
 	type SchematicConnection,
@@ -37,7 +60,9 @@ import {
 	type SchematicEndpoint,
 	type SchematicFence,
 	type SchematicSignalMarker,
+	type SchematicSignalKind,
 	type SchematicRelationKind,
+	type SchematicOrientation,
 	type TransistorComponent,
 	type UmlClassComponent,
 	type UmlSizedComponent,
@@ -57,7 +82,7 @@ const COMPONENT_PATTERN =
 	/^([A-Za-z][A-Za-z0-9_-]*):([A-Za-z][A-Za-z0-9_-]*)\s+"([^"]+)"\s+at\s+\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)\s+(.+)$/;
 /** Lexical shape of a directed connection declaration line. */
 const CONNECTION_PATTERN =
-	/^([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9_-]*)\s*->\s*([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9_-]*)\s+(.+)$/;
+	/^([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9_+-]*)\s*->\s*([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9_+-]*)\s+(.+)$/;
 /**
  * Matches the canonical `schemd` Markdown information string. The legacy
  * `schematic` identifier remains an input-only alias so previously persisted
@@ -114,7 +139,13 @@ function freezeParsedDocument(document: SchematicDocument): SchematicDocument {
 			Object.freeze(component.pins.bottom);
 			Object.freeze(component.pins);
 		}
-		if (component.kind === 'class') {
+		if (
+			component.kind === 'class' ||
+			component.kind === 'interface' ||
+			component.kind === 'enumeration' ||
+			component.kind === 'datatype' ||
+			component.kind === 'object'
+		) {
 			Object.freeze(component.attributes);
 			Object.freeze(component.operations);
 		}
@@ -495,9 +526,37 @@ function parseEnumOption<const T extends readonly string[]>(
 ): T[number] {
 	if (value === undefined) return fallback;
 	if (!includesValue(values, value)) {
-		throw new SchematicSyntaxError(`${name} must be one of: ${values.join(', ')}.`, line);
+		throw new SchematicSyntaxError(`Option ${name} must be one of: ${values.join(', ')}.`, line);
 	}
 	return value;
+}
+
+/** Parse an optional direction without materializing a legacy-default AST field. */
+function parseOrientation(
+	attributes: ReadonlyMap<string, string>,
+	line: number
+): { orientation?: SchematicOrientation } {
+	const value = attributes.get('orientation');
+	return value === undefined
+		? {}
+		: {
+				orientation: parseEnumOption(
+					value,
+					'right',
+					SCHEMATIC_ORIENTATIONS,
+					'orientation',
+					line
+				)
+			};
+}
+
+/** Parse a bounded scalar or bus width. */
+function parseWidth(value: string | undefined, fallback: number, line: number): number {
+	if (value === undefined) return fallback;
+	if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 256) {
+		throw new SchematicSyntaxError('width must be an integer from 1 through 256.', line);
+	}
+	return Number(value);
 }
 
 /**
@@ -657,20 +716,30 @@ function parseComponent(match: RegExpMatchArray, line: number): SchematicCompone
 	const attributes = parseAttributes(tail.options, line);
 	const common = commonComponent(match, tail.color === '' ? 'slate' : tail.color, line);
 	if (includesValue(PASSIVE_KINDS, kind)) {
-		assertOnlyAttributes(attributes, [], line);
-		return { kind, ...common };
+		assertOnlyAttributes(attributes, ['type', 'orientation'], line);
+		const allowed =
+			kind === 'resistor'
+				? (['fixed', 'variable', 'rheostat', 'potentiometer', 'thermistor', 'ldr'] as const)
+				: kind === 'capacitor'
+					? (['fixed', 'variable', 'polarized'] as const)
+					: (['fixed', 'coupled', 'transformer'] as const);
+		const passiveType = parseEnumOption(attributes.get('type'), 'fixed', allowed, 'type', line);
+		return passiveType === 'fixed'
+			? { kind, ...common, ...parseOrientation(attributes, line) }
+			: { kind, ...common, passiveType, ...parseOrientation(attributes, line) };
 	}
 	if (includesValue(ANALOG_KINDS, kind)) {
 		switch (kind) {
 			case 'diode':
-				assertOnlyAttributes(attributes, ['type'], line);
+				assertOnlyAttributes(attributes, ['type', 'orientation'], line);
 				return {
 					kind,
 					...common,
-					diodeType: parseEnumOption(attributes.get('type'), 'standard', DIODE_TYPES, 'type', line)
+					diodeType: parseEnumOption(attributes.get('type'), 'standard', DIODE_TYPES, 'type', line),
+					...parseOrientation(attributes, line)
 				} satisfies DiodeComponent;
 			case 'transistor':
-				assertOnlyAttributes(attributes, ['type'], line);
+				assertOnlyAttributes(attributes, ['type', 'orientation'], line);
 				return {
 					kind,
 					...common,
@@ -680,13 +749,18 @@ function parseComponent(match: RegExpMatchArray, line: number): SchematicCompone
 						TRANSISTOR_TYPES,
 						'type',
 						line
-					)
+					),
+					...parseOrientation(attributes, line)
 				} satisfies TransistorComponent;
-			case 'port':
-				assertOnlyAttributes(attributes, [], line);
-				return { kind, ...common } satisfies PortComponent;
+			case 'port': {
+				assertOnlyAttributes(attributes, ['width', 'orientation'], line);
+				const width = parseWidth(attributes.get('width'), 1, line);
+				return width === 1
+					? { kind, ...common, ...parseOrientation(attributes, line) }
+					: { kind, ...common, width, ...parseOrientation(attributes, line) } satisfies PortComponent;
+			}
 			case 'ground':
-				assertOnlyAttributes(attributes, ['style'], line);
+				assertOnlyAttributes(attributes, ['style', 'orientation'], line);
 				return {
 					kind,
 					...common,
@@ -696,12 +770,41 @@ function parseComponent(match: RegExpMatchArray, line: number): SchematicCompone
 						GROUND_STYLES,
 						'style',
 						line
-					)
+					),
+					...parseOrientation(attributes, line)
 				} satisfies GroundComponent;
 		}
 	}
+	if (includesValue(ELECTRICAL_COMPONENT_KINDS, kind)) {
+		if (kind === 'junction' || kind === 'testpoint') {
+			assertOnlyAttributes(attributes, [], line);
+			return { kind, ...common } satisfies ElectricalComponent;
+		}
+		if (kind === 'connector') {
+			assertOnlyAttributes(attributes, ['orientation'], line);
+			return { kind, ...common, ...parseOrientation(attributes, line) } satisfies ElectricalComponent;
+		}
+		assertOnlyAttributes(attributes, ['type', 'orientation'], line);
+		const variant =
+			kind === 'source'
+				? parseEnumOption(attributes.get('type'), 'voltage-dc', SOURCE_TYPES, 'type', line)
+				: kind === 'power'
+					? parseEnumOption(attributes.get('type'), 'vcc', POWER_TYPES, 'type', line)
+					: kind === 'switch'
+						? parseEnumOption(attributes.get('type'), 'spst', SWITCH_TYPES, 'type', line)
+						: kind === 'protection'
+							? parseEnumOption(attributes.get('type'), 'fuse', PROTECTION_TYPES, 'type', line)
+							: kind === 'amplifier'
+								? parseEnumOption(attributes.get('type'), 'opamp', AMPLIFIER_TYPES, 'type', line)
+								: kind === 'resonator'
+									? parseEnumOption(attributes.get('type'), 'crystal', RESONATOR_TYPES, 'type', line)
+									: kind === 'meter'
+										? parseEnumOption(attributes.get('type'), 'voltmeter', METER_TYPES, 'type', line)
+										: parseEnumOption(attributes.get('type'), 'lamp', LOAD_TYPES, 'type', line);
+		return { kind, ...common, variant, ...parseOrientation(attributes, line) } satisfies ElectricalComponent;
+	}
 	if (includesValue(CLASSICAL_GATE_KINDS, kind)) {
-		assertOnlyAttributes(attributes, ['inputs', 'outputs', 'standard'], line);
+		assertOnlyAttributes(attributes, ['inputs', 'outputs', 'standard', 'orientation'], line);
 		const standard = attributes.get('standard') ?? 'ieee';
 		if (standard !== 'ieee' && standard !== 'iec') {
 			throw new SchematicSyntaxError('standard must be ieee or iec.', line);
@@ -711,26 +814,90 @@ function parseComponent(match: RegExpMatchArray, line: number): SchematicCompone
 			...common,
 			inputs: parseCount(attributes.get('inputs'), kind === 'not' ? 1 : 2, 'inputs', line),
 			outputs: parseCount(attributes.get('outputs'), 1, 'outputs', line),
-			standard
+			standard,
+			...parseOrientation(attributes, line)
 		} satisfies ClassicalGateComponent;
 	}
+	if (includesValue(DIGITAL_COMPONENT_KINDS, kind)) {
+		assertOnlyAttributes(attributes, ['type', 'inputs', 'outputs', 'width', 'orientation'], line);
+		const defaults: Readonly<Record<typeof kind, readonly [number, number]>> = {
+			buffer: [1, 1], logic: [0, 1], clock: [0, 1], flipflop: [3, 2], mux: [2, 1],
+			encoder: [4, 2], decoder: [2, 4], register: [3, 2], counter: [3, 2], adder: [2, 2],
+			comparator: [2, 3], bus: [1, 2]
+		};
+		const [defaultInputs, defaultOutputs] = defaults[kind];
+		let inputs = parseCount(attributes.get('inputs'), defaultInputs === 0 ? 1 : defaultInputs, 'inputs', line);
+		let outputs = parseCount(attributes.get('outputs'), defaultOutputs, 'outputs', line);
+		if ((kind === 'logic' || kind === 'clock') && attributes.has('inputs')) {
+			throw new SchematicSyntaxError(`${kind} does not accept inputs.`, line);
+		}
+		const width = parseWidth(attributes.get('width'), kind === 'bus' || kind === 'register' ? 8 : 1, line);
+		if (attributes.has('width') && kind !== 'bus' && kind !== 'register') {
+			throw new SchematicSyntaxError(`Option width is not supported for ${kind}.`, line);
+		}
+		if (kind === 'bus' && width < 2) {
+			throw new SchematicSyntaxError('Bus width must be at least 2.', line);
+		}
+		const variant =
+			kind === 'buffer'
+				? parseEnumOption(attributes.get('type'), 'plain', BUFFER_TYPES, 'type', line)
+				: kind === 'logic'
+					? parseEnumOption(attributes.get('type'), 'low', LOGIC_STATES, 'type', line)
+					: kind === 'flipflop'
+						? parseEnumOption(attributes.get('type'), 'd', FLIPFLOP_TYPES, 'type', line)
+						: kind === 'mux'
+							? parseEnumOption(attributes.get('type'), 'mux', MUX_TYPES, 'type', line)
+							: kind === 'adder'
+								? parseEnumOption(attributes.get('type'), 'half', ADDER_TYPES, 'type', line)
+								: kind === 'bus'
+									? parseEnumOption(attributes.get('type'), 'splitter', BUS_TYPES, 'type', line)
+									: undefined;
+		if (variant === undefined && attributes.has('type')) {
+			throw new SchematicSyntaxError(`Option type is not supported for ${kind}.`, line);
+		}
+		if (kind === 'adder' && variant === 'full' && !attributes.has('inputs')) inputs = 3;
+		if (kind === 'mux' && variant === 'demux') {
+			if (!attributes.has('inputs')) inputs = 1;
+			if (!attributes.has('outputs')) outputs = 2;
+		}
+		if (kind === 'bus' && variant === 'joiner' && !attributes.has('outputs')) outputs = 1;
+		if ((kind === 'buffer' && (inputs !== 1 || outputs !== 1)) || ((kind === 'logic' || kind === 'clock') && outputs !== 1)) {
+			throw new SchematicSyntaxError(`${kind} has fixed terminal counts.`, line);
+		}
+		const bodyHeight = Math.max(52, Math.max(inputs, outputs) * 16 + 20);
+		const digital: DigitalComponent = {
+			kind, ...common, inputs: kind === 'logic' || kind === 'clock' ? 0 : inputs, outputs, width,
+			bodyWidth: kind === 'buffer' || kind === 'logic' || kind === 'clock' ? 56 : 84,
+			bodyHeight,
+			...parseOrientation(attributes, line)
+		};
+		if (variant !== undefined) digital.variant = variant;
+		return digital;
+	}
 	if (kind === 'ic') {
-		assertOnlyAttributes(attributes, ['left', 'right', 'top', 'bottom'], line);
+		assertOnlyAttributes(attributes, ['left', 'right', 'top', 'bottom', 'orientation'], line);
 		const pins = parseIcPins(attributes, line);
 		return {
 			kind,
 			...common,
 			pins,
-			...integratedCircuitDimensions(pins)
+			...integratedCircuitDimensions(pins),
+			...parseOrientation(attributes, line)
 		} satisfies IcComponent;
 	}
 	if (includesValue(UML_COMPONENT_KINDS, kind)) {
 		switch (kind) {
-			case 'class': {
+			case 'class':
+			case 'interface':
+			case 'enumeration':
+			case 'datatype':
+			case 'object': {
 				assertOnlyAttributes(attributes, ['attributes', 'operations', 'stereotype', 'width'], line);
 				const classAttributes = parseUmlRows(attributes.get('attributes'), 'attributes', line);
 				const operations = parseUmlRows(attributes.get('operations'), 'operations', line);
-				const stereotype = attributes.get('stereotype');
+				const stereotype =
+					attributes.get('stereotype') ??
+					(kind === 'interface' || kind === 'enumeration' || kind === 'datatype' ? kind : undefined);
 				if (stereotype !== undefined && (stereotype === '' || stereotype.length > 128)) {
 					throw new SchematicSyntaxError('stereotype must contain 1 through 128 characters.', line);
 				}
@@ -773,16 +940,36 @@ function parseComponent(match: RegExpMatchArray, line: number): SchematicCompone
 					bodyHeight: 40 + details.length * UML_ROW_HEIGHT
 				} satisfies UmlStateComponent;
 			}
+			case 'history':
+				assertOnlyAttributes(attributes, ['type'], line);
+				return {
+					kind,
+					...common,
+					variant: parseEnumOption(attributes.get('type'), 'shallow', ['shallow', 'deep'] as const, 'type', line)
+				};
 			case 'usecase':
 			case 'lifeline':
 			case 'note':
-			case 'package': {
+			case 'package':
+			case 'component':
+			case 'artifact':
+			case 'node':
+			case 'device':
+			case 'execution':
+			case 'system':
+			case 'action':
+			case 'object-node':
+			case 'partition':
+			case 'activation':
+			case 'fragment':
+			case 'interaction':
+			case 'region': {
 				assertOnlyAttributes(attributes, ['width', 'height'], line);
 				const defaultWidth = Math.max(
 					kind === 'usecase' ? 112 : 96,
 					mathLabelTextWidth(common.label, 8) + 28
 				);
-				const defaultHeight = kind === 'lifeline' ? 180 : kind === 'usecase' ? 56 : 64;
+				const defaultHeight = kind === 'lifeline' ? 180 : kind === 'activation' ? 96 : kind === 'usecase' ? 56 : 64;
 				return {
 					kind,
 					...common,
@@ -797,26 +984,82 @@ function parseComponent(match: RegExpMatchArray, line: number): SchematicCompone
 				} satisfies UmlSizedComponent;
 			}
 			case 'actor':
+			case 'provided-interface':
+			case 'required-interface':
+			case 'component-port':
+			case 'decision':
+			case 'merge':
+			case 'fork':
+			case 'join':
+			case 'activity-final':
+			case 'flow-final':
+			case 'send-signal':
+			case 'receive-signal':
+			case 'destruction':
+			case 'gate':
+			case 'found':
+			case 'lost':
+			case 'choice':
+			case 'state-junction':
+			case 'entry':
+			case 'exit':
+			case 'terminate':
 			case 'initial':
 			case 'final':
 				assertOnlyAttributes(attributes, [], line);
 				return { kind, ...common };
 		}
 	}
-	const quantumKind = kind as QuantumGateKind;
-	assertOnlyAttributes(
-		attributes,
-		quantumKind === 'qgate' ? ['parameter', 'matrix', 'phase'] : [],
-		line
-	);
-	const component: QuantumGateComponent = { kind: quantumKind, ...common };
-	const parameter = attributes.get('parameter');
-	const matrix = attributes.get('matrix');
-	const phase = attributes.get('phase');
-	if (parameter !== undefined) component.parameter = parameter;
-	if (matrix !== undefined) component.matrix = matrix;
-	if (phase !== undefined) component.phase = phase;
-	return component;
+	if (includesValue(QUANTUM_GATE_KINDS, kind)) {
+		const detailed = kind === 'qgate' || includesValue(NAMED_QUANTUM_GATE_KINDS, kind);
+		assertOnlyAttributes(attributes, detailed ? ['parameter', 'matrix', 'phase', 'orientation'] : ['orientation'], line);
+		const component: QuantumGateComponent = { kind, ...common, ...parseOrientation(attributes, line) };
+		if (detailed) {
+			const parameter = attributes.get('parameter');
+			const matrix = attributes.get('matrix');
+			const phase = attributes.get('phase');
+			if (parameter !== undefined) component.parameter = parameter;
+			if (matrix !== undefined) component.matrix = matrix;
+			if (phase !== undefined) component.phase = phase;
+		}
+		return component;
+	}
+	if (includesValue(QUANTUM_SPECIAL_KINDS, kind)) {
+		assertOnlyAttributes(attributes, ['control', 'operator', 'controls', 'targets', 'wires', 'width', 'orientation'], line);
+		if (attributes.has('control') && kind !== 'control' && kind !== 'controlled') {
+			throw new SchematicSyntaxError(`Option control is not supported for ${kind}.`, line);
+		}
+		if (attributes.has('operator') && kind !== 'controlled') {
+			throw new SchematicSyntaxError(`Option operator is not supported for ${kind}.`, line);
+		}
+		if ((attributes.has('controls') || attributes.has('targets')) && !['controlled', 'cz', 'cphase', 'toffoli', 'swap'].includes(kind)) {
+			throw new SchematicSyntaxError(`Control/target counts are not supported for ${kind}.`, line);
+		}
+		if (attributes.has('wires') && kind !== 'barrier' && kind !== 'delay') {
+			throw new SchematicSyntaxError(`Option wires is not supported for ${kind}.`, line);
+		}
+		if (attributes.has('width') && kind !== 'classical-register') {
+			throw new SchematicSyntaxError(`Option width is not supported for ${kind}.`, line);
+		}
+		const controlType = parseEnumOption(attributes.get('control'), 'positive', ['positive', 'negative', 'classical'] as const, 'control', line);
+		const controlled = kind === 'controlled' || kind === 'cz' || kind === 'cphase' || kind === 'toffoli';
+		const component: QuantumSpecialComponent = {
+			kind, ...common,
+			controls: parseCount(attributes.get('controls'), kind === 'toffoli' ? 2 : controlled ? 1 : 0, 'controls', line),
+			targets: parseCount(attributes.get('targets'), kind === 'swap' ? 2 : controlled ? 1 : 0, 'targets', line),
+			wires: parseCount(attributes.get('wires'), kind === 'barrier' || kind === 'delay' ? 2 : 1, 'wires', line),
+			width: parseWidth(attributes.get('width'), kind === 'classical-register' ? 8 : 1, line),
+			...parseOrientation(attributes, line)
+		};
+		if (kind === 'classical-register' && component.width < 2) {
+			throw new SchematicSyntaxError('Classical register width must be at least 2.', line);
+		}
+		if (kind === 'control' || kind === 'controlled') component.controlType = controlType;
+		const operator = attributes.get('operator');
+		if (operator !== undefined) component.operator = operator;
+		return component;
+	}
+	throw new SchematicSyntaxError(`Unsupported component kind ${kind}.`, line);
 }
 
 /**
@@ -844,6 +1087,10 @@ interface ParsedConnectionOptions {
 	label: string | undefined;
 	/** Explicit or relation-derived dash treatment. */
 	dashed: boolean;
+	/** Optional non-default signal domain. */
+	signalKind: SchematicSignalKind | undefined;
+	/** Optional explicit scalar/bus width. */
+	width: number | undefined;
 }
 
 /** Split connection options without breaking quoted labels containing whitespace. */
@@ -898,8 +1145,10 @@ function parseConnectionOptions(raw: string | undefined, line: number): ParsedCo
 	let relation: SchematicRelationKind = 'signal';
 	let label: string | undefined;
 	let dashed = false;
+	let signalKind: SchematicSignalKind | undefined;
+	let width: number | undefined;
 	if (raw === undefined || raw.trim() === '') {
-		return { curve, markerStart, markerEnd, relation, label, dashed };
+		return { curve, markerStart, markerEnd, relation, label, dashed, signalKind, width };
 	}
 
 	const seen = new Set<string>();
@@ -928,6 +1177,14 @@ function parseConnectionOptions(raw: string | undefined, line: number): ParsedCo
 			seen.add('relation');
 			continue;
 		}
+		if (includesValue(SCHEMATIC_SIGNAL_KINDS, token)) {
+			if (seen.has('signal')) {
+				throw new SchematicSyntaxError('Connection signal kind can only be declared once.', line);
+			}
+			signalKind = token;
+			seen.add('signal');
+			continue;
+		}
 		if (token === 'arrow' || token === 'dot') {
 			if (seen.has('marker-end')) {
 				throw new SchematicSyntaxError('Connection marker-end can only be declared once.', line);
@@ -936,7 +1193,7 @@ function parseConnectionOptions(raw: string | undefined, line: number): ParsedCo
 			seen.add('marker-end');
 			continue;
 		}
-		const match = token.match(/^(marker-start|marker-end|relation|label)=(.*)$/);
+		const match = token.match(/^(marker-start|marker-end|relation|label|signal|width)=(.*)$/);
 		if (!match) {
 			throw new SchematicSyntaxError(
 				'Unsupported connection routing, marker, relation, label, or stroke option.',
@@ -967,6 +1224,16 @@ function parseConnectionOptions(raw: string | undefined, line: number): ParsedCo
 				throw new SchematicSyntaxError('Connection labels require 1 through 256 characters.', line);
 			}
 			label = optionValue;
+		} else if (option === 'signal') {
+			if (!includesValue(SCHEMATIC_SIGNAL_KINDS, optionValue)) {
+				throw new SchematicSyntaxError(
+					`signal must be one of: ${SCHEMATIC_SIGNAL_KINDS.join(', ')}.`,
+					line
+				);
+			}
+			signalKind = optionValue;
+		} else if (option === 'width') {
+			width = parseWidth(optionValue, 1, line);
 		} else {
 			const marker = parseSignalMarker(optionValue, option, line);
 			if (option === 'marker-start') markerStart = marker;
@@ -983,20 +1250,24 @@ function parseConnectionOptions(raw: string | undefined, line: number): ParsedCo
 		else if (
 			relation === 'dependency' ||
 			relation === 'message' ||
+			relation === 'asynchronous' ||
+			relation === 'return' ||
+			relation === 'control-flow' ||
+			relation === 'object-flow' ||
 			relation === 'transition' ||
 			relation === 'include' ||
 			relation === 'extend'
 		) {
 			markerEnd = 'open-arrow';
-		}
+		} else if (relation === 'synchronous') markerEnd = 'arrow';
 	}
 	if (!seen.has('stroke-style')) {
-		dashed = ['dependency', 'realization', 'include', 'extend'].includes(relation);
+		dashed = ['dependency', 'realization', 'return', 'include', 'extend'].includes(relation);
 	}
 	if (label === undefined && (relation === 'include' || relation === 'extend')) {
 		label = `«${relation}»`;
 	}
-	return { curve, markerStart, markerEnd, relation, label, dashed };
+	return { curve, markerStart, markerEnd, relation, label, dashed, signalKind, width };
 }
 
 /**
@@ -1021,6 +1292,8 @@ function parseConnection(match: RegExpMatchArray, line: number): SchematicConnec
 		line
 	};
 	if (options.label !== undefined) connection.label = options.label;
+	if (options.signalKind !== undefined) connection.signalKind = options.signalKind;
+	if (options.width !== undefined) connection.width = options.width;
 	return connection;
 }
 
@@ -1074,6 +1347,62 @@ function isClassicalGate(component: SchematicComponent): component is ClassicalG
 	return CLASSICAL_GATE_KINDS.includes(component.kind as ClassicalGateComponent['kind']);
 }
 
+function isDigitalComponent(component: SchematicComponent): component is DigitalComponent {
+	return DIGITAL_COMPONENT_KINDS.includes(component.kind as DigitalComponent['kind']);
+}
+
+function isQuantumSpecial(
+	component: SchematicComponent
+): component is QuantumSpecialComponent {
+	return QUANTUM_SPECIAL_KINDS.includes(component.kind as QuantumSpecialComponent['kind']);
+}
+
+/** Validate an indexed `inN`/`outN` terminal pair. */
+function validIndexedPort(port: string, inputs: number, outputs: number): boolean {
+	if (port === 'in') return inputs > 0;
+	if (port === 'out') return outputs > 0;
+	const match = port.match(/^(in|out)([1-9]\d*)$/);
+	if (match === null) return false;
+	const count = match[1] === 'in' ? inputs : outputs;
+	return Number(match[2]) <= count;
+}
+
+/** Validate compact block-specific digital control and data terminals. */
+function validDigitalPort(component: DigitalComponent, port: string): boolean {
+	if (validIndexedPort(port, component.inputs, component.outputs)) return true;
+	switch (component.kind) {
+		case 'buffer':
+			return component.variant?.startsWith('tristate') === true && port === 'enable';
+		case 'flipflop':
+			return ['d', 'j', 'k', 's', 'r', 't', 'clock', 'enable', 'preset', 'clear', 'q', 'nq'].includes(port);
+		case 'mux':
+			return port === 'select' || port === 'enable';
+		case 'register':
+		case 'counter':
+			return ['clock', 'enable', 'preset', 'clear'].includes(port);
+		case 'comparator':
+			return ['gt', 'eq', 'lt'].includes(port);
+		case 'bus':
+			return ['bus', 'tap'].includes(port);
+		default:
+			return false;
+	}
+}
+
+/** Validate exact track-aware quantum ports. */
+function validQuantumSpecialPort(component: QuantumSpecialComponent, port: string): boolean {
+	if (component.kind === 'prepare') return port === 'out';
+	if (component.kind === 'control') return ['in', 'out', 'control'].includes(port);
+	if (component.kind === 'measure') return ['in', 'out', 'classical'].includes(port);
+	if (component.kind === 'classical-bit' || component.kind === 'classical-register') {
+		return port === 'in' || port === 'out';
+	}
+	const tracks = Math.max(component.wires, component.controls + component.targets);
+	return validIndexedPort(port, tracks, tracks) ||
+		(/^control[1-9]\d*$/.test(port) && Number(port.slice(7)) <= component.controls) ||
+		(/^target[1-9]\d*$/.test(port) && Number(port.slice(6)) <= component.targets);
+}
+
 /**
  * Validate a custom IC pin or stable first-input/first-output alias.
  *
@@ -1119,6 +1448,10 @@ function validateEndpoint(
 	let valid: boolean;
 	if (isClassicalGate(component)) {
 		valid = validGatePort(component, endpoint.port);
+	} else if (isDigitalComponent(component)) {
+		valid = validDigitalPort(component, endpoint.port);
+	} else if (isQuantumSpecial(component)) {
+		valid = validQuantumSpecialPort(component, endpoint.port);
 	} else if (includesValue(UML_COMPONENT_KINDS, component.kind)) {
 		valid = ['in', 'out', 'left', 'right', 'top', 'bottom'].includes(endpoint.port);
 		if (!valid && component.kind === 'lifeline') {
@@ -1126,7 +1459,7 @@ function validateEndpoint(
 			valid = match !== null && Number(match[2]) <= component.bodyHeight;
 		}
 	} else {
-		switch (component.kind) {
+			switch (component.kind) {
 			case 'resistor':
 			case 'capacitor':
 			case 'inductor':
@@ -1154,6 +1487,19 @@ function validateEndpoint(
 			case 'port':
 			case 'hadamard':
 			case 'qgate':
+			case 'xgate':
+			case 'ygate':
+			case 'zgate':
+			case 'sgate':
+			case 'sdg':
+			case 'tgate':
+			case 'tdg':
+			case 'sx':
+			case 'phase':
+			case 'rx':
+			case 'ry':
+			case 'rz':
+			case 'ugate':
 				valid = endpoint.port === 'in' || endpoint.port === 'out';
 				break;
 			case 'ground':
@@ -1165,12 +1511,78 @@ function validateEndpoint(
 			case 'ic':
 				valid = validIcPort(component, endpoint.port);
 				break;
+			case 'junction':
+			case 'testpoint':
+				valid = ['in', 'out', 'node'].includes(endpoint.port);
+				break;
+			case 'connector':
+				valid = endpoint.port === 'in' || endpoint.port === 'out';
+				break;
+			case 'source':
+				valid = ['in', 'out', 'positive', 'negative'].includes(endpoint.port) ||
+					(['vcvs', 'vccs', 'ccvs', 'cccs'].includes(String(component.variant)) && ['control-positive', 'control-negative'].includes(endpoint.port));
+				break;
+			case 'power':
+				valid = endpoint.port === 'in';
+				break;
+			case 'switch':
+				valid = component.variant === 'spdt'
+					? ['in', 'out', 'common', 'normally-open', 'normally-closed'].includes(endpoint.port)
+					: component.variant === 'relay'
+						? ['in', 'out', 'coil1', 'coil2'].includes(endpoint.port)
+						: ['in', 'out'].includes(endpoint.port);
+				break;
+			case 'amplifier':
+				valid = ['in', 'positive', 'negative', 'out', 'v+', 'v-'].includes(endpoint.port);
+				break;
+			case 'protection':
+			case 'resonator':
+			case 'meter':
+			case 'load':
+				valid = ['in', 'out'].includes(endpoint.port);
+				break;
 		}
 	}
 	if (!valid) {
 		throw new SchematicSyntaxError(
 			`Port ${endpoint.componentId}.${endpoint.port} is invalid for ${component.kind}.`,
 			line
+		);
+	}
+}
+
+/** Return the exact scalar/bus width exposed by one validated endpoint. */
+function endpointWidth(
+	endpoint: SchematicEndpoint,
+	components: ReadonlyMap<string, SchematicComponent>
+): number {
+	const component = components.get(endpoint.componentId)!;
+	if (component.kind === 'port') return component.width ?? 1;
+	if (component.kind === 'classical-register') return component.width;
+	if (isDigitalComponent(component)) {
+		if (component.kind === 'register' && (endpoint.port === 'in' || endpoint.port === 'out')) {
+			return component.width;
+		}
+		if (component.kind === 'bus' && endpoint.port === 'bus') return component.width;
+	}
+	return 1;
+}
+
+/** Reject scalar/bus ambiguity and incompatible endpoint widths. */
+function validateConnectionWidth(
+	connection: SchematicConnection,
+	components: ReadonlyMap<string, SchematicComponent>
+): void {
+	const sourceWidth = endpointWidth(connection.from, components);
+	const targetWidth = endpointWidth(connection.to, components);
+	const width = connection.width ?? 1;
+	if ((sourceWidth > 1 || targetWidth > 1) && connection.width === undefined) {
+		throw new SchematicSyntaxError('Bus connections require an explicit width option.', connection.line);
+	}
+	if (sourceWidth !== targetWidth || width !== sourceWidth) {
+		throw new SchematicSyntaxError(
+			`Connection width ${width} is incompatible with ${sourceWidth}-bit source and ${targetWidth}-bit target ports.`,
+			connection.line
 		);
 	}
 }
@@ -1266,6 +1678,7 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 	for (const connection of connections) {
 		validateEndpoint(connection.from, componentsById, connection.line);
 		validateEndpoint(connection.to, componentsById, connection.line);
+		validateConnectionWidth(connection, componentsById);
 	}
 	const document = { components, connections } satisfies SchematicDocument;
 	const routes = validateDocumentGeometry(document, fence);

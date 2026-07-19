@@ -59,6 +59,8 @@ describe('renderSchematic', () => {
 			'data-wire-source="R1.out" data-wire-target="C1.in" data-source-line="7" tabindex="0"'
 		);
 		expect(html).toContain('data-port-id="out" data-parent-node="R1" tabindex="0" role="button"');
+		expect(html).toContain('role="group" aria-labelledby=');
+		expect(html).not.toMatch(/class="schematic-component"[^>]*tabindex=/);
 		expect(html).toContain('stroke-width:8;vector-effect:non-scaling-stroke');
 		expect(html).not.toContain('<script');
 	});
@@ -87,6 +89,7 @@ describe('renderSchematic', () => {
 		expect(styles).toContain('schematic-glow-filter');
 		expect(styles).toContain('schematic-glow-layer');
 		expect(styles).toContain('tabindex="0" role="group"');
+		expect(styles).toContain('role="img" aria-labelledby=');
 		expect(styles).not.toContain('data-node-id');
 		expect(styles).not.toContain('data-port-id');
 
@@ -94,6 +97,8 @@ describe('renderSchematic', () => {
 		expect(hooks).toContain('data-node-id="R1"');
 		expect(hooks).toContain('data-wire-source="R1.out"');
 		expect(hooks).toContain('data-port-id="in"');
+		expect(hooks).toContain('role="group" aria-labelledby=');
+		expect(hooks).not.toMatch(/class="schematic-component"[^>]*tabindex=/);
 		expect(hooks).toContain(
 			'.schematic-port-hotspot{fill:transparent!important;stroke:transparent!important'
 		);
@@ -224,12 +229,13 @@ R2.out -> R3.in #blue [ortho marker-start=dot marker-end=arrow]`,
 		expect(interactive.match(/class="schematic-wire"/g)).toHaveLength(2);
 	});
 
-	test('omits an empty defs block for a minimal non-reusable gate', () => {
+	test('reuses the polished qgate shell through one canonical definition', () => {
 		const minimal = renderSchematic(
 			parseSchematic('qgate:Q1 "RX" at (120, 100) #purple', fence),
 			fence
 		);
-		expect(minimal).not.toContain('<defs>');
+		expect(minimal).toContain('<defs>');
+		expect(minimal).toContain('symbol-quantum-shell-50-50');
 	});
 
 	test('namespaces every interactive definition and vector reference per diagram', () => {
@@ -278,7 +284,7 @@ qgate:QX "Pauli & X" at (620, 130) hsl(270 80% 60%) [parameter="θ&lt;π" matrix
 		);
 		expect(html).toContain('aria-label="QX, qgate, Pauli &amp; X, θ&amp;lt;π, π/2');
 		expect(html).toContain(
-			'class="schematic-gate-symbol" fill="currentColor" stroke="none" x="0" y="-14"'
+			'class="schematic-gate-symbol" fill="currentColor" stroke="none" x="0" y="-18.5"'
 		);
 		expect(html).toContain('θ&amp;lt;π');
 	});
@@ -319,7 +325,7 @@ ic:U1 "Flight control multiplexer" at (390, 130) #cyan [left="SELECT_LONG" right
 			title: 'Fitted labels'
 		});
 
-		expect(html).toContain('textLength="56" lengthAdjust="spacingAndGlyphs">Long quantum operator');
+		expect(html).toContain('textLength="92" lengthAdjust="spacingAndGlyphs">Long quantum operator');
 		expect(html).toContain('textLength="34" lengthAdjust="spacingAndGlyphs">SELECT_LONG');
 		expect(html).toContain('transform="rotate(90 0 -27)"');
 		expect(html).toContain('transform="rotate(-90 0 27)"');

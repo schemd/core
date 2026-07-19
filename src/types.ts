@@ -12,6 +12,20 @@
 export const PASSIVE_KINDS = ['resistor', 'capacitor', 'inductor'] as const;
 /** A supported passive two-terminal component keyword. */
 export type PassiveKind = (typeof PASSIVE_KINDS)[number];
+/** Compact variant registry shared by the three passive families. */
+export const PASSIVE_TYPES = [
+	'fixed',
+	'variable',
+	'rheostat',
+	'potentiometer',
+	'thermistor',
+	'ldr',
+	'polarized',
+	'coupled',
+	'transformer'
+] as const;
+/** A validated passive construction variant. */
+export type PassiveType = (typeof PASSIVE_TYPES)[number];
 
 /** Discrete analog and boundary component keywords accepted by the DSL. */
 export const ANALOG_KINDS = ['diode', 'transistor', 'port', 'ground'] as const;
@@ -19,12 +33,21 @@ export const ANALOG_KINDS = ['diode', 'transistor', 'port', 'ground'] as const;
 export type AnalogKind = (typeof ANALOG_KINDS)[number];
 
 /** Valid diode construction variants. */
-export const DIODE_TYPES = ['standard', 'schottky', 'zener', 'led'] as const;
+export const DIODE_TYPES = [
+	'standard',
+	'schottky',
+	'zener',
+	'led',
+	'photodiode',
+	'varactor',
+	'scr',
+	'triac'
+] as const;
 /** A diode construction variant selected by the `type` attribute. */
 export type DiodeType = (typeof DIODE_TYPES)[number];
 
 /** Valid bipolar and field-effect transistor variants. */
-export const TRANSISTOR_TYPES = ['npn', 'pnp', 'nmos', 'pmos'] as const;
+export const TRANSISTOR_TYPES = ['npn', 'pnp', 'nmos', 'pmos', 'njfet', 'pjfet', 'nigbt', 'pigbt'] as const;
 /** A transistor variant selected by the `type` attribute. */
 export type TransistorType = (typeof TRANSISTOR_TYPES)[number];
 
@@ -34,22 +57,175 @@ export const GROUND_STYLES = ['chassis', 'earth', 'signal'] as const;
 export type GroundStyle = (typeof GROUND_STYLES)[number];
 
 /** Classical logic gate keywords supported by the vector renderer. */
-export const CLASSICAL_GATE_KINDS = ['nand', 'nor', 'xor', 'and', 'or', 'not'] as const;
+export const ELECTRICAL_COMPONENT_KINDS = [
+	'source',
+	'junction',
+	'testpoint',
+	'connector',
+	'power',
+	'switch',
+	'protection',
+	'amplifier',
+	'resonator',
+	'meter',
+	'load'
+] as const;
+export type ElectricalComponentKind = (typeof ELECTRICAL_COMPONENT_KINDS)[number];
+export const SOURCE_TYPES = [
+	'voltage-dc',
+	'voltage-ac',
+	'voltage-pulse',
+	'current-dc',
+	'current-ac',
+	'battery',
+	'vcvs',
+	'vccs',
+	'ccvs',
+	'cccs'
+] as const;
+export type SourceType = (typeof SOURCE_TYPES)[number];
+export const POWER_TYPES = ['vcc', 'vdd', 'vss', 'positive', 'negative'] as const;
+export type PowerType = (typeof POWER_TYPES)[number];
+export const SWITCH_TYPES = ['spst', 'spdt', 'pushbutton', 'relay'] as const;
+export type SwitchType = (typeof SWITCH_TYPES)[number];
+export const PROTECTION_TYPES = ['fuse', 'breaker'] as const;
+export type ProtectionType = (typeof PROTECTION_TYPES)[number];
+export const AMPLIFIER_TYPES = ['opamp', 'comparator', 'instrumentation'] as const;
+export type AmplifierType = (typeof AMPLIFIER_TYPES)[number];
+export const RESONATOR_TYPES = ['crystal', 'ceramic'] as const;
+export type ResonatorType = (typeof RESONATOR_TYPES)[number];
+export const METER_TYPES = ['voltmeter', 'ammeter'] as const;
+export type MeterType = (typeof METER_TYPES)[number];
+export const LOAD_TYPES = ['lamp', 'motor', 'speaker', 'buzzer'] as const;
+export type LoadType = (typeof LOAD_TYPES)[number];
+
+/** Classical logic gates with IEEE- and IEC-style vector contours. */
+export const CLASSICAL_GATE_KINDS = ['nand', 'nor', 'xor', 'xnor', 'and', 'or', 'not'] as const;
 /** A supported classical logic gate keyword. */
 export type ClassicalGateKind = (typeof CLASSICAL_GATE_KINDS)[number];
 
 /** Native and polymorphic quantum operator keywords. */
-export const QUANTUM_GATE_KINDS = ['hadamard', 'cnot', 'qgate'] as const;
+export const DIGITAL_COMPONENT_KINDS = [
+	'buffer',
+	'logic',
+	'clock',
+	'flipflop',
+	'mux',
+	'encoder',
+	'decoder',
+	'register',
+	'counter',
+	'adder',
+	'comparator',
+	'bus'
+] as const;
+export type DigitalComponentKind = (typeof DIGITAL_COMPONENT_KINDS)[number];
+export const BUFFER_TYPES = [
+	'plain',
+	'tristate',
+	'tristate-inverter',
+	'schmitt',
+	'schmitt-inverter'
+] as const;
+export type BufferType = (typeof BUFFER_TYPES)[number];
+export const LOGIC_STATES = ['high', 'low', 'unknown', 'high-z'] as const;
+export type LogicState = (typeof LOGIC_STATES)[number];
+export const FLIPFLOP_TYPES = ['sr-latch', 'd-latch', 'd', 'jk', 't'] as const;
+export type FlipFlopType = (typeof FLIPFLOP_TYPES)[number];
+export const MUX_TYPES = ['mux', 'demux'] as const;
+export type MuxType = (typeof MUX_TYPES)[number];
+export const ADDER_TYPES = ['half', 'full'] as const;
+export type AdderType = (typeof ADDER_TYPES)[number];
+export const BUS_TYPES = ['tap', 'splitter', 'joiner'] as const;
+export type BusType = (typeof BUS_TYPES)[number];
+
+/** Native, named, and polymorphic quantum operator keywords. */
+export const NAMED_QUANTUM_GATE_KINDS = [
+	'xgate',
+	'ygate',
+	'zgate',
+	'sgate',
+	'sdg',
+	'tgate',
+	'tdg',
+	'sx',
+	'phase',
+	'rx',
+	'ry',
+	'rz',
+	'ugate'
+] as const;
+export type NamedQuantumGateKind = (typeof NAMED_QUANTUM_GATE_KINDS)[number];
+export const QUANTUM_SPECIAL_KINDS = [
+	'measure',
+	'reset',
+	'prepare',
+	'swap',
+	'control',
+	'cz',
+	'cphase',
+	'toffoli',
+	'controlled',
+	'barrier',
+	'delay',
+	'classical-bit',
+	'classical-register'
+] as const;
+export type QuantumSpecialKind = (typeof QUANTUM_SPECIAL_KINDS)[number];
+export const QUANTUM_GATE_KINDS = [
+	'hadamard',
+	'cnot',
+	'qgate',
+	...NAMED_QUANTUM_GATE_KINDS
+] as const;
 /** A supported native or polymorphic quantum gate keyword. */
 export type QuantumGateKind = (typeof QUANTUM_GATE_KINDS)[number];
 
 /** First-class UML node keywords spanning structural and behavioral diagrams. */
 export const UML_COMPONENT_KINDS = [
 	'class',
+	'interface',
+	'provided-interface',
+	'required-interface',
+	'enumeration',
+	'datatype',
+	'object',
+	'component',
+	'component-port',
+	'artifact',
+	'node',
+	'device',
+	'execution',
+	'system',
 	'actor',
 	'usecase',
 	'state',
 	'lifeline',
+	'action',
+	'decision',
+	'merge',
+	'fork',
+	'join',
+	'activity-final',
+	'flow-final',
+	'object-node',
+	'send-signal',
+	'receive-signal',
+	'partition',
+	'activation',
+	'destruction',
+	'fragment',
+	'interaction',
+	'gate',
+	'found',
+	'lost',
+	'choice',
+	'state-junction',
+	'history',
+	'entry',
+	'exit',
+	'terminate',
+	'region',
 	'note',
 	'package',
 	'initial',
@@ -62,8 +238,11 @@ export type UmlComponentKind = (typeof UML_COMPONENT_KINDS)[number];
 export const COMPONENT_KINDS = [
 	...PASSIVE_KINDS,
 	...ANALOG_KINDS,
+	...ELECTRICAL_COMPONENT_KINDS,
 	...CLASSICAL_GATE_KINDS,
+	...DIGITAL_COMPONENT_KINDS,
 	...QUANTUM_GATE_KINDS,
+	...QUANTUM_SPECIAL_KINDS,
 	...UML_COMPONENT_KINDS,
 	'ic'
 ] as const;
@@ -111,6 +290,13 @@ export interface SchematicPoint {
 	y: number;
 }
 
+/** Author-facing quarter-turn orientations for direction-sensitive components. */
+export const SCHEMATIC_ORIENTATIONS = ['right', 'down', 'left', 'up'] as const;
+/** A direction-sensitive component's canonical quarter-turn orientation. */
+export type SchematicOrientation = (typeof SCHEMATIC_ORIENTATIONS)[number];
+/** Compact clockwise quarter-turn count used by exact layout arithmetic. */
+export type SchematicQuarterTurn = 0 | 1 | 2 | 3;
+
 /** Shared immutable source metadata for every parsed component. */
 interface ComponentBase extends SchematicPoint {
 	/** Document-unique component identifier used by connection endpoints. */
@@ -123,14 +309,22 @@ interface ComponentBase extends SchematicPoint {
 	line: number;
 }
 
+/** Shared metadata for symbols whose canonical geometry supports quarter turns. */
+export interface DirectionalComponentBase extends ComponentBase {
+	/** Explicit orientation; absence preserves the legacy canonical direction. */
+	orientation?: SchematicOrientation;
+}
+
 /** Parsed resistor, capacitor, or inductor component. */
-export interface PassiveComponent extends ComponentBase {
+export interface PassiveComponent extends DirectionalComponentBase {
 	/** Specific two-terminal passive kind. */
 	kind: PassiveKind;
+	/** Non-default construction variant; absence means fixed. */
+	passiveType?: PassiveType;
 }
 
 /** Parsed diode with its selected physical symbol variant. */
-export interface DiodeComponent extends ComponentBase {
+export interface DiodeComponent extends DirectionalComponentBase {
 	/** Discriminant for diode components. */
 	kind: 'diode';
 	/** Standard, Schottky, Zener, or LED vector treatment. */
@@ -138,7 +332,7 @@ export interface DiodeComponent extends ComponentBase {
 }
 
 /** Parsed bipolar or field-effect transistor. */
-export interface TransistorComponent extends ComponentBase {
+export interface TransistorComponent extends DirectionalComponentBase {
 	/** Discriminant for transistor components. */
 	kind: 'transistor';
 	/** Electrical device family and polarity. */
@@ -146,21 +340,41 @@ export interface TransistorComponent extends ComponentBase {
 }
 
 /** Parsed system-boundary input/output terminal. */
-export interface PortComponent extends ComponentBase {
+export interface PortComponent extends DirectionalComponentBase {
 	/** Discriminant for boundary ports. */
 	kind: 'port';
+	/** Optional bus width; absence is a scalar port. */
+	width?: number;
 }
 
 /** Parsed zero-volt reference symbol. */
-export interface GroundComponent extends ComponentBase {
+export interface GroundComponent extends DirectionalComponentBase {
 	/** Discriminant for ground references. */
 	kind: 'ground';
 	/** Chassis, earth, or signal-ground visual form. */
 	groundStyle: GroundStyle;
 }
 
+/** Variant value accepted by one of the compact electrical symbol families. */
+export type ElectricalVariant =
+	| SourceType
+	| PowerType
+	| SwitchType
+	| ProtectionType
+	| AmplifierType
+	| ResonatorType
+	| MeterType
+	| LoadType;
+
+/** Parsed source, switch, functional block, load, or electrical node. */
+export interface ElectricalComponent extends DirectionalComponentBase {
+	kind: ElectricalComponentKind;
+	/** Family-specific validated variant; absent only for junction/testpoint/connector. */
+	variant?: ElectricalVariant;
+}
+
 /** Parsed IEEE- or IEC-style classical logic gate. */
-export interface ClassicalGateComponent extends ComponentBase {
+export interface ClassicalGateComponent extends DirectionalComponentBase {
 	/** Logic operation represented by the gate. */
 	kind: ClassicalGateKind;
 	/** Validated number of addressable input pins, from 1 through 32. */
@@ -171,8 +385,24 @@ export interface ClassicalGateComponent extends ComponentBase {
 	standard: 'ieee' | 'iec';
 }
 
+/** Compact digital block normalized from storage, selection, arithmetic, and bus keywords. */
+export interface DigitalComponent extends DirectionalComponentBase {
+	kind: DigitalComponentKind;
+	/** Family-specific variant such as tristate, D flip-flop, or splitter. */
+	variant?: BufferType | LogicState | FlipFlopType | MuxType | AdderType | BusType;
+	/** Validated logical input count. */
+	inputs: number;
+	/** Validated logical output count. */
+	outputs: number;
+	/** Scalar width or bus width represented by relevant terminals. */
+	width: number;
+	/** Deterministic body dimensions used by ports, obstacles, and SVG generation. */
+	bodyWidth: number;
+	bodyHeight: number;
+}
+
 /** Parsed native or user-labelled quantum operator. */
-export interface QuantumGateComponent extends ComponentBase {
+export interface QuantumGateComponent extends DirectionalComponentBase {
 	/** Quantum operator family. */
 	kind: QuantumGateKind;
 	/** Optional operator parameter rendered through the micro-math pipeline. */
@@ -181,6 +411,23 @@ export interface QuantumGateComponent extends ComponentBase {
 	matrix?: string;
 	/** Optional phase expression. */
 	phase?: string;
+}
+
+/** Non-unitary, multi-wire, control, timing, or classical quantum-circuit primitive. */
+export interface QuantumSpecialComponent extends DirectionalComponentBase {
+	kind: QuantumSpecialKind;
+	/** Positive or negative standalone/embedded control marker. */
+	controlType?: 'positive' | 'negative' | 'classical';
+	/** Operator rendered at the target of a generalized controlled gate. */
+	operator?: string;
+	/** Number of control tracks. */
+	controls: number;
+	/** Number of target tracks. */
+	targets: number;
+	/** Total parallel tracks accepted by barriers, delays, and registers. */
+	wires: number;
+	/** Classical register width, or one for scalar quantum/classical nodes. */
+	width: number;
 }
 
 /** Pin names registered on each side of a polymorphic integrated circuit. */
@@ -196,7 +443,7 @@ export interface IntegratedCircuitPins {
 }
 
 /** Parsed custom multi-terminal integrated-circuit block. */
-export interface IcComponent extends ComponentBase {
+export interface IcComponent extends DirectionalComponentBase {
 	/** Discriminant for custom integrated circuits and architecture blocks. */
 	kind: 'ic';
 	/** Addressable, side-aware pin registry. */
@@ -213,7 +460,7 @@ export type IntegratedCircuitComponent = IcComponent;
 /** Parsed UML class with independently sized attribute and operation compartments. */
 export interface UmlClassComponent extends ComponentBase {
 	/** UML class node discriminant. */
-	kind: 'class';
+	kind: 'class' | 'interface' | 'enumeration' | 'datatype' | 'object';
 	/** Optional stereotype displayed above the class name. */
 	stereotype?: string;
 	/** Attribute declarations in source order. */
@@ -237,7 +484,24 @@ export interface UmlStateComponent extends ComponentBase {
 
 /** Parsed UML ellipse, note, package, or sequence lifeline. */
 export interface UmlSizedComponent extends ComponentBase {
-	kind: 'usecase' | 'lifeline' | 'note' | 'package';
+	kind:
+		| 'usecase'
+		| 'lifeline'
+		| 'note'
+		| 'package'
+		| 'component'
+		| 'artifact'
+		| 'node'
+		| 'device'
+		| 'execution'
+		| 'system'
+		| 'action'
+		| 'object-node'
+		| 'partition'
+		| 'activation'
+		| 'fragment'
+		| 'interaction'
+		| 'region';
 	bodyWidth: number;
 	bodyHeight: number;
 }
@@ -249,7 +513,32 @@ export interface UmlActorComponent extends ComponentBase {
 
 /** Parsed UML initial or final pseudostate. */
 export interface UmlPseudostateComponent extends ComponentBase {
-	kind: 'initial' | 'final';
+	kind:
+		| 'initial'
+		| 'final'
+		| 'provided-interface'
+		| 'required-interface'
+		| 'component-port'
+		| 'decision'
+		| 'merge'
+		| 'fork'
+		| 'join'
+		| 'activity-final'
+		| 'flow-final'
+		| 'send-signal'
+		| 'receive-signal'
+		| 'destruction'
+		| 'gate'
+		| 'found'
+		| 'lost'
+		| 'choice'
+		| 'state-junction'
+		| 'history'
+		| 'entry'
+		| 'exit'
+		| 'terminate';
+	/** History depth; present only on history pseudostates. */
+	variant?: 'shallow' | 'deep';
 }
 
 /** Every UML component accepted by the compiler. */
@@ -267,8 +556,11 @@ export type SchematicComponent =
 	| TransistorComponent
 	| PortComponent
 	| GroundComponent
+	| ElectricalComponent
 	| ClassicalGateComponent
+	| DigitalComponent
 	| QuantumGateComponent
+	| QuantumSpecialComponent
 	| IcComponent
 	| UmlComponent;
 
@@ -281,6 +573,13 @@ export const UML_RELATION_KINDS = [
 	'aggregation',
 	'composition',
 	'message',
+	'synchronous',
+	'asynchronous',
+	'return',
+	'control-flow',
+	'object-flow',
+	'assembly',
+	'delegation',
 	'transition',
 	'include',
 	'extend'
@@ -289,6 +588,10 @@ export const UML_RELATION_KINDS = [
 export type UmlRelationKind = (typeof UML_RELATION_KINDS)[number];
 /** Electrical signal or a first-class UML relationship. */
 export type SchematicRelationKind = 'signal' | UmlRelationKind;
+
+/** Physical/semantic channel carried by a signal connection. */
+export const SCHEMATIC_SIGNAL_KINDS = ['electrical', 'digital', 'quantum', 'classical'] as const;
+export type SchematicSignalKind = (typeof SCHEMATIC_SIGNAL_KINDS)[number];
 
 /** Address of one component terminal in a connection declaration. */
 export interface SchematicEndpoint {
@@ -314,6 +617,10 @@ export interface SchematicConnection {
 	markerEnd: SchematicSignalMarker;
 	/** Electrical or UML relationship semantics. */
 	relation?: SchematicRelationKind;
+	/** Non-default signal domain; absence preserves legacy electrical behavior. */
+	signalKind?: SchematicSignalKind;
+	/** Validated bus/register width; absence denotes a scalar connection. */
+	width?: number;
 	/** Optional text centered beside the routed connector. */
 	label?: string;
 	/** Whether the trace uses the UML dependency dash pattern. */

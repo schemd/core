@@ -2,7 +2,7 @@ import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 
-const MAX_GZIP_BYTES = 20 * 1024;
+const MAX_GZIP_BYTES = 30 * 1024;
 const virtualEntry = 'virtual:schemd-size-entry';
 const compilerPath = fileURLToPath(new URL('../src/compiler.ts', import.meta.url));
 

@@ -1,18 +1,24 @@
 /** Component geometry, port placement, route avoidance, and bridge-crossing verification. */
 import { describe, expect, test } from 'vitest';
 import {
+	composeQuarterTurns,
 	componentRectangle,
 	componentObstacleRectangle,
 	componentTextAnchors,
 	enumerateComponentPorts,
 	MAX_SCHEMATIC_WIRE_CROSSINGS,
+	orientationQuarterTurn,
 	parseSchematic,
 	positionIcPin,
+	inverseQuarterTurn,
 	resolvePortPoint,
+	rotateQuarterExtents,
+	rotateQuarterPoint,
 	routeConnection,
 	routeConnections,
 	SCHEMATIC_BRIDGE_RADIUS,
 	SCHEMATIC_OBSTACLE_CLEARANCE,
+	SCHEMATIC_ORIENTATIONS,
 	validateDocumentGeometry,
 	type ClassicalGateComponent,
 	type PassiveComponent,
@@ -30,6 +36,50 @@ const fence: SchematicFence = {
 };
 
 const token: SchematicColor = { kind: 'token', value: 'slate' };
+
+describe('integer quarter-turn geometry', () => {
+	test('normalizes public orientations and composes every turn modulo four', () => {
+		expect(SCHEMATIC_ORIENTATIONS).toEqual(['right', 'down', 'left', 'up']);
+		expect(SCHEMATIC_ORIENTATIONS.map(orientationQuarterTurn)).toEqual([0, 1, 2, 3]);
+		for (const first of [0, 1, 2, 3] as const) {
+			for (const second of [0, 1, 2, 3] as const) {
+				expect(composeQuarterTurns(first, second)).toBe((first + second) % 4);
+			}
+			expect(composeQuarterTurns(first, inverseQuarterTurn(first))).toBe(0);
+		}
+	});
+
+	test('rotates points and vectors exactly without producing negative zero', () => {
+		const point = { x: 12.5, y: -7.25 };
+		expect(rotateQuarterPoint(point, 0)).toEqual({ x: 12.5, y: -7.25 });
+		expect(rotateQuarterPoint(point, 1)).toEqual({ x: 7.25, y: 12.5 });
+		expect(rotateQuarterPoint(point, 2)).toEqual({ x: -12.5, y: 7.25 });
+		expect(rotateQuarterPoint(point, 3)).toEqual({ x: -7.25, y: -12.5 });
+
+		let rotated = point;
+		for (let turn = 0; turn < 4; turn += 1) rotated = rotateQuarterPoint(rotated, 1);
+		expect(rotated).toEqual(point);
+
+		for (const turn of [0, 1, 2, 3] as const) {
+			const zero = rotateQuarterPoint({ x: -0, y: 0 }, turn);
+			expect(Object.is(zero.x, -0)).toBe(false);
+			expect(Object.is(zero.y, -0)).toBe(false);
+		}
+	});
+
+	test('swaps rectangular half-extents only for odd quarter turns', () => {
+		const extents = { halfWidth: 42, halfHeight: 18 };
+		expect(rotateQuarterExtents(extents, 0)).toEqual(extents);
+		expect(rotateQuarterExtents(extents, 1)).toEqual({ halfWidth: 18, halfHeight: 42 });
+		expect(rotateQuarterExtents(extents, 2)).toEqual(extents);
+		expect(rotateQuarterExtents(extents, 3)).toEqual({ halfWidth: 18, halfHeight: 42 });
+		for (const turn of [0, 1, 2, 3] as const) {
+			const zero = rotateQuarterExtents({ halfWidth: -0, halfHeight: 0 }, turn);
+			expect(Object.is(zero.halfWidth, -0)).toBe(false);
+			expect(Object.is(zero.halfHeight, -0)).toBe(false);
+		}
+	});
+});
 
 function findComponent(document: SchematicDocument, id: string): SchematicComponent {
 	const component = document.components.find((candidate) => candidate.id === id);
