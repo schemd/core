@@ -277,6 +277,26 @@ export function distributedCoordinate(index: number, count: number, span: number
 	return ((index + 1) * span) / (count + 1) - span / 2;
 }
 
+/** Total centered height of a quantum glyph carrying `tracks` qubit lines. */
+export function quantumTrackSpan(tracks: number): number {
+	return Math.max(16, (tracks - 1) * 18);
+}
+
+/**
+ * Vertical offset of quantum track `index` within a `tracks`-line glyph.
+ *
+ * Unlike {@link distributedCoordinate}, tracks are spread *edge-to-edge* so the
+ * outermost rails land exactly at ±span/2 — where the connecting bar and body
+ * extent terminate. That keeps control dots, targets, and swap crosses on rails
+ * a full pitch apart instead of collapsing a two-qubit swap into an overlapped
+ * star. Renderer and port geometry both call this, so marks and wires align.
+ */
+export function quantumTrackCoordinate(index: number, tracks: number): number {
+	if (tracks <= 1) return 0;
+	const span = quantumTrackSpan(tracks);
+	return -span / 2 + (index * span) / (tracks - 1);
+}
+
 /**
  * Compute a classical gate height that scales with its busiest terminal side.
  *
@@ -687,11 +707,11 @@ export function resolvePortPoint(component: SchematicComponent, port: string): S
 			if (port.startsWith('target')) index += component.controls;
 			const tracks = Math.max(component.wires, component.controls + component.targets);
 			if (port.startsWith('control') || port.startsWith('target')) {
-				local = { x: 0, y: distributedCoordinate(index, Math.max(1, tracks), Math.max(16, (tracks - 1) * 18)) };
+				local = { x: 0, y: quantumTrackCoordinate(index, tracks) };
 			} else {
 				local = {
 					x: port.startsWith('out') ? 42 : -42,
-					y: distributedCoordinate(index, Math.max(1, tracks), Math.max(16, (tracks - 1) * 18))
+					y: quantumTrackCoordinate(index, tracks)
 				};
 			}
 				break;

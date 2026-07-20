@@ -15,6 +15,8 @@ import {
 	enumerateComponentPorts,
 	PORT_HOTSPOT_RADIUS,
 	quantumGateDimensions,
+	quantumTrackCoordinate,
+	quantumTrackSpan,
 	routeConnections,
 	validateDocumentGeometry,
 	type IcPinSide,
@@ -888,12 +890,12 @@ function quantumSpecialShape(component: QuantumSpecialComponent, paint: string, 
 	if (component.kind === 'control') return `<path ${paint} d="M -42 0 H 42" />${component.controlType === 'negative' ? `<circle ${paint} cx="0" cy="0" r="5" />` : `<circle ${nodePaint} cx="0" cy="0" r="5" />`}`;
 	if (component.kind === 'classical-bit' || component.kind === 'classical-register') return `<path ${paint} d="M -40 -2 H 40 M -40 2 H 40" />`;
 	const tracks = Math.max(component.wires, component.controls + component.targets);
-	const span = Math.max(16, (tracks - 1) * 18);
-	const lines = Array.from({ length: tracks }, (_, index) => `<path ${paint} d="M -42 ${svgNumber(distributedCoordinate(index, tracks, span))} H 42" />`).join('');
+	const span = quantumTrackSpan(tracks);
+	const lines = Array.from({ length: tracks }, (_, index) => `<path ${paint} d="M -42 ${svgNumber(quantumTrackCoordinate(index, tracks))} H 42" />`).join('');
 	if (component.kind === 'barrier') return `${lines}<path ${paint} stroke-dasharray="4 3" d="M 0 ${svgNumber(-span / 2 - 8)} V ${svgNumber(span / 2 + 8)}" />`;
 	if (component.kind === 'delay') return `${lines}<rect ${paint} x="-12" y="${svgNumber(-span / 2 - 7)}" width="24" height="${svgNumber(span + 14)}" rx="2" />`;
 	const marks = Array.from({ length: tracks }, (_, index) => {
-		const y = distributedCoordinate(index, tracks, span);
+		const y = quantumTrackCoordinate(index, tracks);
 		if (component.kind === 'swap') return `<path ${paint} d="M -6 ${svgNumber(y - 6)} L 6 ${svgNumber(y + 6)} M 6 ${svgNumber(y - 6)} L -6 ${svgNumber(y + 6)}" />`;
 		if (component.kind === 'cz') return `<circle ${nodePaint} cx="0" cy="${svgNumber(y)}" r="4" />`;
 		if (index < component.controls) {

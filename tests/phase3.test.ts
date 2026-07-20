@@ -237,7 +237,18 @@ bus:BX "BX" at (900,100) #cyan [type=joiner width=8 outputs=3]`;
 		for (const source of valid) expect(parseSchematic(source, fence).connections).toHaveLength(1);
 
 		const swap = parseSchematic('swap:S "S" at (100,100) #purple', fence).components[0]!;
-		expect(resolvePortPoint(swap, 'in')).toEqual({ x: 58, y: 97 });
+		// Quantum tracks distribute edge-to-edge: the two swap rails sit a full
+		// 18-unit pitch apart (y = 91 and 109), so the ×—× reads as a swap, not a star.
+		expect(resolvePortPoint(swap, 'in')).toEqual({ x: 58, y: 91 });
+		expect(resolvePortPoint(swap, 'in2')).toEqual({ x: 58, y: 109 });
+		// The rendered crosses must land on those two rails (local ±9), a full pitch
+		// apart — never overlapped into a single star at the glyph centre.
+		const swapSvg = renderSchematic(
+			parseSchematic('swap:S "S" at (100,100) #purple', fence),
+			{ ...fence, mode: 'full' }
+		);
+		expect(swapSvg).toContain('d="M -6 -15 L 6 -3 M 6 -15 L -6 -3"');
+		expect(swapSvg).toContain('d="M -6 3 L 6 15 M 6 3 L -6 15"');
 		const latch = parseSchematic('flipflop:F "F" at (100,100) #cyan [type=sr-latch]', fence).components[0]!;
 		expect(enumerateComponentPorts(latch).map(({ id }) => id)).toContain('enable');
 
