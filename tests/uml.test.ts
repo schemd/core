@@ -80,9 +80,9 @@ state:Ready "Ready" at (720, 180) #blue [details="entry / f_c;do / e^{x^2}"]`,
 			fence
 		);
 		const html = renderSchematic(mathDocument, fence);
-		expect(html).toContain('«<tspan dy="0">Δ</tspan>»');
+		expect(html).toContain('«<tspan dy="0em" font-size="100%">Δ</tspan>»');
 		expect(html).toContain('- impedance: Ω');
-		expect(html).toContain('>+ gain(x</tspan><tspan dy="-0.55em"');
+		expect(html).toContain('>+ gain(x</tspan><tspan dy="-0.7857em"');
 		expect(html).toContain('): ∞</tspan>');
 		expect(html).toContain('>c</tspan>');
 		expect(html).not.toContain('\\Omega');

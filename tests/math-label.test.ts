@@ -25,7 +25,7 @@ describe('micro math labels', () => {
 	test('emits escaped tspans with explicit baseline restoration', () => {
 		const rendered = renderMathLabelTspans('V_{in}<\\Omega^{2}');
 		expect(rendered).toBe(
-			'<tspan dy="0">V</tspan><tspan dy="0.35em" font-size="70%">in</tspan><tspan dy="-0.35em" font-size="100%"></tspan><tspan dy="0">&lt;Ω</tspan><tspan dy="-0.55em" font-size="70%">2</tspan><tspan dy="0.55em" font-size="100%"></tspan>'
+			'<tspan dy="0em" font-size="100%">V</tspan><tspan dy="0.5em" font-size="70%">in</tspan><tspan dy="-0.35em" font-size="100%">&lt;Ω</tspan><tspan dy="-0.7857em" font-size="70%">2</tspan><tspan dy="0.55em" font-size="100%"></tspan>'
 		);
 	});
 

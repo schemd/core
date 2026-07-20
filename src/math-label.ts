@@ -307,9 +307,11 @@ export function mathLabelTextWidth(value: string, cellAdvance = 7): number {
 /**
  * Emit escaped inline SVG text with explicit baseline restoration.
  *
- * Plain labels avoid `<tspan>` allocation entirely. Shifted segments carry
- * absolute scale and baseline metrics; each emitted `dy` is the delta from the
- * preceding run, so nested and consecutive scripts cannot accumulate drift.
+ * Baseline shifts are tracked in root-em units, but SVG resolves a `<tspan>`'s
+ * `dy="…em"` against *that tspan's own* (scaled) font-size. Each emitted `dy` is
+ * therefore the root-em delta divided by the tspan's font scale, so a shift of
+ * `d` root-em applied on a `s`-scaled run renders as exactly `d` — nested and
+ * consecutive scripts return to the parent baseline with zero drift.
  *
  * @param value - Raw micro-math label.
  * @returns Trusted compiler-owned XML text suitable inside an SVG `<text>` node.
@@ -319,33 +321,27 @@ export function renderMathLabelTspans(value: string): string {
 	if (segments.length === 1 && segments[0]?.kind === 'text' && segments[0].value === value) {
 		return escapeXml(value);
 	}
-	const nested = segments.some((segment) => segment.fontScale !== undefined);
-	if (nested) {
-		let previousShift = 0;
-		let markup = '';
-		for (const segment of segments) {
-			const shift =
-				segment.baselineShiftEm ??
-				(segment.kind === 'subscript' ? 0.35 : segment.kind === 'superscript' ? -0.55 : 0);
-			const scale = segment.fontScale ?? (segment.kind === 'text' ? 1 : 0.7);
-			const delta = Number((shift - previousShift).toFixed(4));
-			const fontPercent = Number((scale * 100).toFixed(2));
-			markup += `<tspan dy="${delta}em" font-size="${fontPercent}%">${escapeXml(segment.value)}</tspan>`;
-			previousShift = shift;
-		}
-		if (previousShift !== 0) {
-			markup += `<tspan dy="${Number((-previousShift).toFixed(4))}em" font-size="100%"></tspan>`;
-		}
-		return markup;
+	/*
+	 * One delta-based pass for every label. Each run carries its own `dy`
+	 * measured from the previous run's baseline; the reset after a script is
+	 * folded into the next real glyph rather than a standalone empty `<tspan>`,
+	 * because SVG renderers ignore `dy` on empty tspans. Only a label that ends
+	 * mid-script emits a trailing (harmless, terminal) restoring run.
+	 */
+	let previousShift = 0;
+	let markup = '';
+	for (const segment of segments) {
+		const shift =
+			segment.baselineShiftEm ??
+			(segment.kind === 'subscript' ? 0.35 : segment.kind === 'superscript' ? -0.55 : 0);
+		const scale = segment.fontScale ?? (segment.kind === 'text' ? 1 : 0.7);
+		const delta = Number(((shift - previousShift) / scale).toFixed(4));
+		const fontPercent = Number((scale * 100).toFixed(2));
+		markup += `<tspan dy="${delta}em" font-size="${fontPercent}%">${escapeXml(segment.value)}</tspan>`;
+		previousShift = shift;
 	}
-	return segments
-		.map((segment) => {
-			const content = escapeXml(segment.value);
-			if (segment.kind === 'text') return `<tspan dy="0">${content}</tspan>`;
-			if (segment.kind === 'subscript') {
-				return `<tspan dy="0.35em" font-size="70%">${content}</tspan><tspan dy="-0.35em" font-size="100%"></tspan>`;
-			}
-			return `<tspan dy="-0.55em" font-size="70%">${content}</tspan><tspan dy="0.55em" font-size="100%"></tspan>`;
-		})
-		.join('');
+	if (previousShift !== 0) {
+		markup += `<tspan dy="${Number((-previousShift).toFixed(4))}em" font-size="100%"></tspan>`;
+	}
+	return markup;
 }
