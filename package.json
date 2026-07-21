@@ -60,10 +60,12 @@
     "benchmark": "bun run build && node scripts/benchmark.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "prepack": "bun run build",
-    "release:check": "bun run check && bun run test:coverage && bun run test:visual && bun run build && bun run size && node scripts/benchmark.mjs",
+    "release:check": "bun run check && bun run test:coverage && bun run test:mutation && bun run test:visual && bun run build && bun run size && node scripts/benchmark.mjs",
     "size": "node scripts/check-bundle-size.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:fuzz": "vitest run tests/fuzz.test.ts",
+    "test:mutation": "node scripts/mutation.mjs",
     "test:visual": "playwright test --config=playwright.config.ts",
     "test:visual:install": "playwright install chromium"
   },

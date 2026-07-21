@@ -7,4 +7,4 @@
 - Quantum nodes follow common OpenQASM-style circuit notation: wires, boxed unitary gates, solid/open controls, swap crosses, measurement, and distinct classical result channels.
 - UML nodes and relation endpoints follow established OMG UML visual conventions for the implemented structural, behavioral, interaction, and state-machine subset.
 
-Marker geometry is diagram-local and scales with the connection stroke contract. Hollow UML markers use `--schematic-surface` for their fill so colored host surfaces do not show false solid heads.
+Marker geometry is diagram-local and scales with the connection stroke contract. Open arrow, triangle, and diamond interiors use `fill="none"`; a zero-width carrier positions each marker while the visible path is trimmed beneath it, so arbitrary host backgrounds remain visible without trace bleed.

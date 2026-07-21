@@ -81,6 +81,8 @@ interface AxisSegment {
 interface TraceSegment {
 	readonly id: number;
 	readonly routeIndex: number;
+	readonly netId?: string;
+	seen: number;
 	readonly start: SchematicPoint;
 	readonly end: SchematicPoint;
 	readonly orthogonal: boolean;
@@ -230,6 +232,10 @@ export function rotateQuarterExtents(
 const MAX_ROUTER_STATES = 40_000;
 /** Small deterministic bend cost that prefers simpler routes of equal Manhattan length. */
 const ROUTER_BEND_PENALTY = 0.25;
+/** Discourage bridge crossings while permitting them when they shorten a route materially. */
+const ROUTER_CROSSING_PENALTY = 8;
+/** Make reusing an unrelated wire channel more expensive than any bounded canvas detour. */
+const ROUTER_CHANNEL_REUSE_PENALTY = 16_384;
 /** Spatial-hash cell size used to bound wire-crossing comparisons. */
 const CROSSING_BUCKET_SIZE = 64;
 /** Smallest bridge radius that survives three-decimal SVG serialization. */
@@ -245,6 +251,8 @@ const TEXT_ASCENT_GUTTER = 12;
 const TEXT_DESCENT_GUTTER = 5;
 /** Monospace glyph-width estimate used for static text fitting. */
 const TEXT_ADVANCE = 7;
+/** Compact connector-label width estimate at the renderer's 11px font size. */
+const CONNECTION_TEXT_ADVANCE = 6;
 /** Horizontal clearance retained around external text rows. */
 const TEXT_HORIZONTAL_GUTTER = 4;
 
@@ -1117,6 +1125,127 @@ export function componentObstacleRectangle(
 	return expandedComponentRectangle(component, clearance);
 }
 
+/** Locate the half-length point of a routed connection. */
+export function connectionLabelPoint(route: RoutedConnection): SchematicPoint {
+	if (route.curve === 'bezier' && route.points.length >= 4) {
+		const a = route.points[0]!;
+		const b = route.points[1]!;
+		const c = route.points[2]!;
+		const d = route.points[3]!;
+		return {
+			x: (a.x + 3 * b.x + 3 * c.x + d.x) / 8,
+			y: (a.y + 3 * b.y + 3 * c.y + d.y) / 8
+		};
+	}
+	let total = 0;
+	for (let index = 1; index < route.points.length; index += 1) {
+		total +=
+			Math.abs(route.points[index]!.x - route.points[index - 1]!.x) +
+			Math.abs(route.points[index]!.y - route.points[index - 1]!.y);
+	}
+	let remaining = total / 2;
+	for (let index = 1; index < route.points.length; index += 1) {
+		const start = route.points[index - 1]!;
+		const end = route.points[index]!;
+		const length = Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
+		if (remaining <= length) {
+			const ratio = length === 0 ? 0 : remaining / length;
+			return { x: start.x + (end.x - start.x) * ratio, y: start.y + (end.y - start.y) * ratio };
+		}
+		remaining -= length;
+	}
+	/* v8 ignore next -- validated routes always contain their half-length point. */
+	return route.points.at(-1)!;
+}
+
+/** Conservative renderer-aligned occupancy rectangle for one connector label. */
+export function connectionLabelRectangle(
+	connection: SchematicConnection,
+	route: RoutedConnection
+): SchematicRectangle | undefined {
+	if (connection.label === undefined) return undefined;
+	const point = connectionLabelPoint(route);
+	const halfWidth = mathLabelTextWidth(connection.label, CONNECTION_TEXT_ADVANCE) / 2 + 3;
+	return {
+		minX: point.x - halfWidth,
+		minY: point.y - 20,
+		maxX: point.x + halfWidth,
+		maxY: point.y
+	};
+}
+
+interface IndexedRoutingRectangle {
+	readonly owner: string;
+	readonly kind: 'body' | 'expanded' | 'label';
+	readonly rectangle: SchematicRectangle;
+	seen: number;
+}
+
+interface RoutingIndex {
+	readonly rectangles: IndexedRoutingRectangle[];
+	readonly rectangleBuckets: Map<number, IndexedRoutingRectangle[]>;
+	readonly wireBuckets: Map<number, TraceSegment[]>;
+	nextWireKey: number;
+	rectangleQuery: number;
+	wireQuery: number;
+}
+
+function addRoutingRectangle(
+	index: RoutingIndex,
+	owner: string,
+	kind: IndexedRoutingRectangle['kind'],
+	rectangle: SchematicRectangle
+): void {
+	const entry = { owner, kind, rectangle, seen: 0 };
+	index.rectangles.push(entry);
+	const minimum = Math.floor(rectangle.minX / CROSSING_BUCKET_SIZE);
+	const maximum = Math.floor(rectangle.maxX / CROSSING_BUCKET_SIZE);
+	for (let bucket = minimum; bucket <= maximum; bucket += 1) {
+		const entries = index.rectangleBuckets.get(bucket) ?? [];
+		entries.push(entry);
+		index.rectangleBuckets.set(bucket, entries);
+	}
+}
+
+/** External designator and label rows that must remain readable around wires. */
+function componentLabelRectangles(component: SchematicComponent): readonly SchematicRectangle[] {
+	if (isUmlComponent(component)) return [];
+	const anchors = componentTextAnchors(component);
+	return [
+		{
+			minX: component.x - anchors.designatorWidth / 2 - TEXT_HORIZONTAL_GUTTER,
+			minY: component.y + anchors.designatorY - TEXT_ASCENT_GUTTER,
+			maxX: component.x + anchors.designatorWidth / 2 + TEXT_HORIZONTAL_GUTTER,
+			maxY: component.y + anchors.designatorY + TEXT_DESCENT_GUTTER
+		},
+		{
+			minX: component.x - anchors.labelWidth / 2 - TEXT_HORIZONTAL_GUTTER,
+			minY: component.y + anchors.labelY - TEXT_ASCENT_GUTTER,
+			maxX: component.x + anchors.labelWidth / 2 + TEXT_HORIZONTAL_GUTTER,
+			maxY: component.y + anchors.labelY + TEXT_DESCENT_GUTTER
+		}
+	];
+}
+
+function createRoutingIndex(components: ReadonlyMap<string, SchematicComponent>): RoutingIndex {
+	const index: RoutingIndex = {
+		rectangles: [],
+		rectangleBuckets: new Map(),
+		wireBuckets: new Map(),
+		nextWireKey: 0,
+		rectangleQuery: 0,
+		wireQuery: 0
+	};
+	for (const component of components.values()) {
+		addRoutingRectangle(index, component.id, 'body', componentObstacleRectangle(component, 0));
+		addRoutingRectangle(index, component.id, 'expanded', componentObstacleRectangle(component));
+		for (const label of componentLabelRectangles(component)) {
+			addRoutingRectangle(index, component.id, 'label', label);
+		}
+	}
+	return index;
+}
+
 /**
  * Detect a strict interior intersection between an arbitrary line segment and AABB.
  *
@@ -1164,6 +1293,63 @@ function segmentIntersectsRectangle(
 	return maximum > 0 && minimum < 1;
 }
 
+type RoutingCollisionMode = 'route' | 'manual' | 'body';
+
+function rectangleParticipates(
+	entry: IndexedRoutingRectangle,
+	mode: RoutingCollisionMode,
+	fromId: string,
+	toId: string
+): boolean {
+	const endpoint = entry.owner === fromId || entry.owner === toId;
+	if (mode === 'body') return entry.kind === 'body' && !endpoint;
+	if (mode === 'manual') return !endpoint && entry.kind !== 'expanded';
+	return endpoint ? entry.kind === 'body' : entry.kind !== 'body';
+}
+
+/** Query the reusable document index for a segment collision. */
+function indexedSegmentCollision(
+	index: RoutingIndex,
+	start: SchematicPoint,
+	end: SchematicPoint,
+	fromId: string,
+	toId: string,
+	mode: RoutingCollisionMode,
+	margin = 0
+): IndexedRoutingRectangle | undefined {
+	const minimum = Math.floor((Math.min(start.x, end.x) - margin) / CROSSING_BUCKET_SIZE);
+	const maximum = Math.floor((Math.max(start.x, end.x) + margin) / CROSSING_BUCKET_SIZE);
+	const query = ++index.rectangleQuery;
+	for (let bucket = minimum; bucket <= maximum; bucket += 1) {
+		for (const entry of index.rectangleBuckets.get(bucket) ?? []) {
+			if (entry.seen === query || !rectangleParticipates(entry, mode, fromId, toId)) continue;
+			entry.seen = query;
+			const rectangle =
+				margin === 0
+					? entry.rectangle
+					: {
+							minX: entry.rectangle.minX - margin,
+							minY: entry.rectangle.minY - margin,
+							maxX: entry.rectangle.maxX + margin,
+							maxY: entry.rectangle.maxY + margin
+						};
+			if (segmentIntersectsRectangle(start, end, rectangle)) return entry;
+		}
+	}
+	return undefined;
+}
+
+/** Materialize lane coordinates once per route, not once per candidate edge. */
+function routingRectangles(
+	index: RoutingIndex,
+	fromId: string,
+	toId: string
+): readonly SchematicRectangle[] {
+	return index.rectangles
+		.filter((entry) => rectangleParticipates(entry, 'route', fromId, toId))
+		.map((entry) => entry.rectangle);
+}
+
 /** Conservative geometrically bounded subdivision test for a cubic Bézier against an AABB. */
 function cubicIntersectsRectangle(
 	points: readonly [SchematicPoint, SchematicPoint, SchematicPoint, SchematicPoint],
@@ -1199,14 +1385,16 @@ function cubicIntersectsRectangle(
 	);
 }
 
-/** Test whether any segment in a candidate penetrates an obstacle. */
+/** Test whether any segment in a candidate penetrates an indexed obstacle. */
 function routeIntersectsObstacles(
 	points: readonly SchematicPoint[],
-	obstacles: readonly SchematicRectangle[]
+	spatialIndex: RoutingIndex,
+	fromId: string,
+	toId: string
 ): boolean {
-	for (let index = 1; index < points.length; index += 1) {
-		for (const obstacle of obstacles) {
-			if (segmentIntersectsRectangle(points[index - 1]!, points[index]!, obstacle)) return true;
+	for (let pointIndex = 1; pointIndex < points.length; pointIndex += 1) {
+		if (indexedSegmentCollision(spatialIndex, points[pointIndex - 1]!, points[pointIndex]!, fromId, toId, 'route')) {
+			return true;
 		}
 	}
 	return false;
@@ -1231,6 +1419,68 @@ function candidateLength(points: readonly SchematicPoint[]): number {
 /** Count bends in an already orthogonal candidate. */
 function candidateBends(points: readonly SchematicPoint[]): number {
 	return Math.max(0, points.length - 2);
+}
+
+/** Soft cost for crossing or reusing already-routed unrelated wire channels. */
+function wireSegmentCost(
+	index: RoutingIndex,
+	start: SchematicPoint,
+	end: SchematicPoint,
+	netId: string | undefined
+): number {
+	const minimum = Math.floor(Math.min(start.x, end.x) / CROSSING_BUCKET_SIZE);
+	const maximum = Math.floor(Math.max(start.x, end.x) / CROSSING_BUCKET_SIZE);
+	const query = ++index.wireQuery;
+	const candidate: TraceSegment = { id: -1, routeIndex: -1, start, end, orthogonal: true, seen: 0 };
+	let cost = 0;
+	for (let bucket = minimum; bucket <= maximum; bucket += 1) {
+		for (const previous of index.wireBuckets.get(bucket) ?? []) {
+			if (previous.seen === query) continue;
+			previous.seen = query;
+			if (netId !== undefined && previous.netId === netId) continue;
+			const contact = segmentContact(candidate, previous);
+			if (contact !== undefined) {
+				cost += contact.strict && !contact.overlap && previous.orthogonal
+					? ROUTER_CROSSING_PENALTY
+					: ROUTER_CHANNEL_REUSE_PENALTY;
+			}
+		}
+	}
+	return cost;
+}
+
+function routeOccupancyCost(
+	points: readonly SchematicPoint[],
+	index: RoutingIndex,
+	netId: string | undefined
+): number {
+	let cost = 0;
+	for (let pointIndex = 1; pointIndex < points.length; pointIndex += 1) {
+		cost += wireSegmentCost(index, points[pointIndex - 1]!, points[pointIndex]!, netId);
+	}
+	return cost;
+}
+
+/** Add a completed route and its label to the index for later source-order routes. */
+function indexCompletedRoute(
+	index: RoutingIndex,
+	route: RoutedConnection,
+	connection: SchematicConnection,
+	routeIndex: number
+): void {
+	const segments = traceSegments(route, routeIndex, index.nextWireKey, connection.netId);
+	index.nextWireKey += segments.length;
+	for (const segment of segments) {
+		const minimum = Math.floor(Math.min(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE);
+		const maximum = Math.floor(Math.max(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE);
+		for (let bucket = minimum; bucket <= maximum; bucket += 1) {
+			const entries = index.wireBuckets.get(bucket) ?? [];
+			entries.push(segment);
+			index.wireBuckets.set(bucket, entries);
+		}
+	}
+	const label = connectionLabelRectangle(connection, route);
+	if (label !== undefined) addRoutingRectangle(index, `wire-${routeIndex}`, 'label', label);
 }
 
 /** Deterministic minimum heap used by the bounded sparse Manhattan fallback. */
@@ -1295,6 +1545,10 @@ function searchOrthogonalRoute(
 	start: SchematicPoint,
 	end: SchematicPoint,
 	obstacles: readonly SchematicRectangle[],
+	index: RoutingIndex,
+	fromId: string,
+	toId: string,
+	netId: string | undefined,
 	bounds: SchematicBounds | undefined,
 	line: number
 ): SchematicPoint[] | undefined {
@@ -1358,19 +1612,16 @@ function searchOrthogonalRoute(
 		for (const [nextX, nextY, direction] of neighbors) {
 			if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= ys.length) continue;
 			const to = { x: xs[nextX]!, y: ys[nextY]! };
-			let blocked = false;
-			for (const obstacle of obstacles) {
-				if (segmentIntersectsRectangle(from, to, obstacle)) {
-					blocked = true;
-					break;
-				}
-			}
-			if (blocked) continue;
+			if (indexedSegmentCollision(index, from, to, fromId, toId, 'route')) continue;
 			const cell = nextY * width + nextX;
 			const state = stateId(cell, direction);
 			const bend = current.direction !== 0 && current.direction !== direction;
 			const g =
-				current.g + Math.abs(from.x - to.x) + Math.abs(from.y - to.y) + (bend ? ROUTER_BEND_PENALTY : 0);
+				current.g +
+				Math.abs(from.x - to.x) +
+				Math.abs(from.y - to.y) +
+				(bend ? ROUTER_BEND_PENALTY : 0) +
+				wireSegmentCost(index, from, to, netId);
 			if (g >= (gScore.get(state) ?? Number.POSITIVE_INFINITY)) continue;
 			gScore.set(state, g);
 			previous.set(state, current.state);
@@ -1406,6 +1657,10 @@ function routeBetweenEscapes(
 	start: SchematicPoint,
 	end: SchematicPoint,
 	obstacles: readonly SchematicRectangle[],
+	index: RoutingIndex,
+	fromId: string,
+	toId: string,
+	netId: string | undefined,
 	bounds: SchematicBounds | undefined,
 	line: number
 ): SchematicPoint[] | undefined {
@@ -1416,8 +1671,24 @@ function routeBetweenEscapes(
 		{ x: middleX, y: end.y },
 		end
 	]);
-	if (!routeIntersectsObstacles(direct, obstacles)) return direct;
-	const candidates: SchematicPoint[][] = [];
+	let best: SchematicPoint[] | undefined;
+	let bestScore = Number.POSITIVE_INFINITY;
+	if (!routeIntersectsObstacles(direct, index, fromId, toId)) {
+		const occupancy = routeOccupancyCost(direct, index, netId);
+		if (occupancy === 0) return direct;
+		best = direct;
+		bestScore = candidateLength(direct) + candidateBends(direct) * ROUTER_BEND_PENALTY + occupancy;
+	}
+	const consider = (raw: SchematicPoint[]): void => {
+		const candidate = compactOrthogonalPoints(raw);
+		const baseScore = candidateLength(candidate) + candidateBends(candidate) * ROUTER_BEND_PENALTY;
+		if (baseScore >= bestScore || routeIntersectsObstacles(candidate, index, fromId, toId)) return;
+		const score = baseScore + routeOccupancyCost(candidate, index, netId);
+		if (score < bestScore) {
+			best = candidate;
+			bestScore = score;
+		}
+	};
 	const yLanes = uniqueSorted([
 		start.y,
 		end.y,
@@ -1426,7 +1697,7 @@ function routeBetweenEscapes(
 	]);
 	for (const y of yLanes) {
 		if (bounds !== undefined && (y < 0 || y > bounds.height)) continue;
-		candidates.push([start, { x: start.x, y }, { x: end.x, y }, end]);
+		consider([start, { x: start.x, y }, { x: end.x, y }, end]);
 	}
 	const xLanes = uniqueSorted([
 		start.x,
@@ -1436,20 +1707,9 @@ function routeBetweenEscapes(
 	]);
 	for (const x of xLanes) {
 		if (bounds !== undefined && (x < 0 || x > bounds.width)) continue;
-		candidates.push([start, { x, y: start.y }, { x, y: end.y }, end]);
+		consider([start, { x, y: start.y }, { x, y: end.y }, end]);
 	}
-	let best: SchematicPoint[] | undefined;
-	let bestScore = Number.POSITIVE_INFINITY;
-	for (const raw of candidates) {
-		const candidate = compactOrthogonalPoints(raw);
-		if (routeIntersectsObstacles(candidate, obstacles)) continue;
-		const score = candidateLength(candidate) + candidateBends(candidate) * ROUTER_BEND_PENALTY;
-		if (score < bestScore) {
-			best = candidate;
-			bestScore = score;
-		}
-	}
-	return best ?? searchOrthogonalRoute(start, end, obstacles, bounds, line);
+	return best ?? searchOrthogonalRoute(start, end, obstacles, index, fromId, toId, netId, bounds, line);
 }
 
 /**
@@ -1459,12 +1719,6 @@ function routeBetweenEscapes(
  * @param components - Complete component map used for endpoint and obstacle lookup.
  * @returns SVG path data plus control/corner points for later bounds checks.
  */
-interface CachedObstacle {
-	readonly id: string;
-	readonly expanded: SchematicRectangle;
-	readonly body: SchematicRectangle;
-}
-
 /** Conservative along-path length and half-width for one SVG signal marker. */
 function markerCollisionSize(
 	marker: SchematicConnection['markerStart']
@@ -1489,7 +1743,7 @@ function markerCollisionSize(
 function validateMarkerCollisions(
 	connection: SchematicConnection,
 	route: RoutedConnection,
-	obstacles: readonly CachedObstacle[],
+	index: RoutingIndex,
 	fromId: string,
 	toId: string
 ): RoutedConnection {
@@ -1511,20 +1765,20 @@ function validateMarkerCollisions(
 			x: endpoint.x + (dx / magnitude) * size.length,
 			y: endpoint.y + (dy / magnitude) * size.length
 		};
-		for (const obstacle of obstacles) {
-			if (obstacle.id === fromId || obstacle.id === toId) continue;
-			const expanded = {
-				minX: obstacle.body.minX - size.radius,
-				minY: obstacle.body.minY - size.radius,
-				maxX: obstacle.body.maxX + size.radius,
-				maxY: obstacle.body.maxY + size.radius
-			};
-			if (segmentIntersectsRectangle(endpoint, inward, expanded)) {
-				throw new SchematicSyntaxError(
-					`${marker} marker intersects ${obstacle.id}; use ortho or move the obstacle.`,
-					connection.line
-				);
-			}
+		const collision = indexedSegmentCollision(
+			index,
+			endpoint,
+			inward,
+			fromId,
+			toId,
+			'body',
+			size.radius
+		);
+		if (collision !== undefined) {
+			throw new SchematicSyntaxError(
+				`${marker} marker intersects ${collision.owner}; use ortho or move the obstacle.`,
+				connection.line
+			);
 		}
 	}
 	return route;
@@ -1553,7 +1807,7 @@ function routeConnectionInternal(
 	connection: SchematicConnection,
 	components: ReadonlyMap<string, SchematicComponent>,
 	bounds: SchematicBounds | undefined,
-	cachedObstacles: readonly CachedObstacle[] | undefined
+	spatialIndex: RoutingIndex | undefined
 ): RoutedConnection {
 	const from = endpointGeometry(connection.from, components);
 	const to = endpointGeometry(connection.to, components);
@@ -1563,25 +1817,23 @@ function routeConnectionInternal(
 	const sy = formatNumber(start.y);
 	const ex = formatNumber(end.x);
 	const ey = formatNumber(end.y);
-	const obstacleCache =
-		cachedObstacles ??
-		Array.from(components.values(), (component) => ({
-			id: component.id,
-			expanded: componentObstacleRectangle(component),
-			body: componentObstacleRectangle(component, 0)
-		}));
+	const routingIndex = spatialIndex ?? createRoutingIndex(components);
 	if (connection.curve === 'bezier') {
 		const middleX = (start.x + end.x) / 2;
 		const controlA = { x: middleX, y: start.y };
 		const controlB = { x: middleX, y: end.y };
-		for (const obstacle of obstacleCache) {
+		for (const obstacle of routingIndex.rectangles) {
 			if (
-				obstacle.id !== from.component.id &&
-				obstacle.id !== to.component.id &&
-				cubicIntersectsRectangle([start, controlA, controlB, end], obstacle.body)
+				rectangleParticipates(
+					obstacle,
+					'manual',
+					from.component.id,
+					to.component.id
+				) &&
+				cubicIntersectsRectangle([start, controlA, controlB, end], obstacle.rectangle)
 			) {
 				throw new SchematicSyntaxError(
-					`Bézier route intersects ${obstacle.id}; use an orthogonal route or move the obstacle.`,
+					`Bézier route intersects ${obstacle.owner}; use an orthogonal route or move the obstacle.`,
 					connection.line
 				);
 			}
@@ -1590,23 +1842,26 @@ function routeConnectionInternal(
 			curve: 'bezier',
 			d: `M ${sx} ${sy} C ${formatNumber(controlA.x)} ${formatNumber(controlA.y)}, ${formatNumber(controlB.x)} ${formatNumber(controlB.y)}, ${ex} ${ey}`,
 			points: [start, controlA, controlB, end]
-		}, obstacleCache, from.component.id, to.component.id);
+		}, routingIndex, from.component.id, to.component.id);
 	}
 	if (connection.curve === 'ortho') {
 		if (
 			from.component.id !== to.component.id &&
 			endpointsFaceEachOther(from, to) &&
-			!obstacleCache.some(
-				(entry) =>
-					entry.id !== from.component.id &&
-					entry.id !== to.component.id &&
-					segmentIntersectsRectangle(start, end, entry.expanded)
-			)
+			indexedSegmentCollision(
+				routingIndex,
+				start,
+				end,
+				from.component.id,
+				to.component.id,
+				'route'
+			) === undefined &&
+			wireSegmentCost(routingIndex, start, end, connection.netId) === 0
 		) {
 			return validateMarkerCollisions(
 				connection,
 				{ curve: 'ortho', d: orthogonalPath([start, end]), points: [start, end] },
-				obstacleCache,
+				routingIndex,
 				from.component.id,
 				to.component.id
 			);
@@ -1632,13 +1887,19 @@ function routeConnectionInternal(
 		});
 		const startEscape = escape(from, fromObstacle);
 		const endEscape = escape(to, toObstacle);
-		const obstacleRectangle = (entry: CachedObstacle): SchematicRectangle =>
-			entry.id === from.component.id || entry.id === to.component.id ? entry.body : entry.expanded;
-		const obstacleRectangles = obstacleCache.map(obstacleRectangle);
+		const obstacleRectangles = routingRectangles(
+			routingIndex,
+			from.component.id,
+			to.component.id
+		);
 		const middle = routeBetweenEscapes(
 			startEscape,
 			endEscape,
 			obstacleRectangles,
+			routingIndex,
+			from.component.id,
+			to.component.id,
+			connection.netId,
 			bounds,
 			connection.line
 		);
@@ -1655,41 +1916,46 @@ function routeConnectionInternal(
 		for (let index = 1; index < points.length; index += 1) {
 			const allowFrom = index === 1;
 			const allowTo = index === points.length - 1;
-			for (const obstacle of obstacleCache) {
-				if (
-					!(allowFrom && obstacle.id === from.component.id) &&
-					!(allowTo && obstacle.id === to.component.id) &&
-					segmentIntersectsRectangle(points[index - 1]!, points[index]!, obstacle.body)
-				) {
-					throw new SchematicSyntaxError(
-						`Orthogonal route intersects ${obstacle.id} after routing.`,
-						connection.line
-					);
-				}
+			const collision = indexedSegmentCollision(
+				routingIndex,
+				points[index - 1]!,
+				points[index]!,
+				allowFrom ? from.component.id : '',
+				allowTo ? to.component.id : '',
+				'body'
+			);
+			/* v8 ignore next -- indexed A* excludes this defensive postcondition by construction. */
+			if (collision !== undefined) {
+				throw new SchematicSyntaxError(
+					`Orthogonal route intersects ${collision.owner} after routing.`,
+					connection.line
+				);
 			}
 		}
 		return validateMarkerCollisions(connection, {
 			curve: 'ortho',
 			d: orthogonalPath(points),
 			points: points as [SchematicPoint, SchematicPoint, ...SchematicPoint[]]
-		}, obstacleCache, from.component.id, to.component.id);
+		}, routingIndex, from.component.id, to.component.id);
 	}
-	for (const obstacle of obstacleCache) {
-		if (
-			obstacle.id !== from.component.id &&
-			obstacle.id !== to.component.id &&
-			segmentIntersectsRectangle(start, end, obstacle.body)
-		) {
+	const collision = indexedSegmentCollision(
+		routingIndex,
+		start,
+		end,
+		from.component.id,
+		to.component.id,
+		'manual'
+	);
+	if (collision !== undefined) {
 			throw new SchematicSyntaxError(
-				`Line route intersects ${obstacle.id}; use an orthogonal route or move the obstacle.`,
+				`Line route intersects ${collision.owner}; use an orthogonal route or move the obstacle.`,
 				connection.line
 			);
-		}
 	}
 	return validateMarkerCollisions(
 		connection,
 		{ curve: 'line', d: `M ${sx} ${sy} L ${ex} ${ey}`, points: [start, end] },
-		obstacleCache,
+		routingIndex,
 		from.component.id,
 		to.component.id
 	);
@@ -1736,7 +2002,12 @@ function connectionsAreInternalToSameComponent(
 }
 
 /** Deterministically flatten one routed path for universal contact tests. */
-function traceSegments(route: RoutedConnection, routeIndex: number, firstId: number): TraceSegment[] {
+function traceSegments(
+	route: RoutedConnection,
+	routeIndex: number,
+	firstId: number,
+	netId?: string
+): TraceSegment[] {
 	let points: readonly SchematicPoint[] = route.points;
 	if (route.curve === 'bezier') {
 		const a = route.points[0]!;
@@ -1770,6 +2041,8 @@ function traceSegments(route: RoutedConnection, routeIndex: number, firstId: num
 		segments.push({
 			id: firstId + segments.length,
 			routeIndex,
+			...(netId === undefined ? {} : { netId }),
+			seen: 0,
 			start,
 			end,
 			orthogonal: route.curve === 'ortho'
@@ -1986,7 +2259,7 @@ function bridgedOrthogonalPath(
 	if (crossings.size === 0) return route;
 	const first = route.points[0]!;
 	let path = `M ${formatNumber(first.x)} ${formatNumber(first.y)}`;
-	const boundsPoints: SchematicPoint[] = [...route.points];
+	const boundsPoints: SchematicPoint[] = [first];
 	for (let index = 1; index < route.points.length; index += 1) {
 		const start = route.points[index - 1]!;
 		const end = route.points[index]!;
@@ -2032,8 +2305,8 @@ function bridgedOrthogonalPath(
 				cursorX = after;
 				boundsPoints.push(
 					{ x: before, y: crossing.y },
-					{ x: after, y: crossing.y },
-					{ x: crossing.x, y: crossing.y - radius }
+					{ x: crossing.x, y: crossing.y - radius },
+					{ x: after, y: crossing.y }
 				);
 			}
 			if (cursorX !== end.x) path += ` H ${formatNumber(end.x)}`;
@@ -2054,11 +2327,14 @@ function bridgedOrthogonalPath(
 				cursorY = after;
 				boundsPoints.push(
 					{ x: crossing.x, y: before },
-					{ x: crossing.x, y: after },
-					{ x: crossing.x - radius, y: crossing.y }
+					{ x: crossing.x - radius, y: crossing.y },
+					{ x: crossing.x, y: after }
 				);
 			}
 			if (cursorY !== end.y) path += ` V ${formatNumber(end.y)}`;
+		}
+		if (boundsPoints.at(-1)!.x !== end.x || boundsPoints.at(-1)!.y !== end.y) {
+			boundsPoints.push(end);
 		}
 	}
 	return {
@@ -2084,14 +2360,13 @@ export function routeConnections(
 	components: ReadonlyMap<string, SchematicComponent>,
 	bounds?: SchematicBounds
 ): readonly RoutedConnection[] {
-	const cachedObstacles = Array.from(components.values(), (component) => ({
-		id: component.id,
-		expanded: componentObstacleRectangle(component),
-		body: componentObstacleRectangle(component, 0)
-	}));
-	const routes = connections.map((connection) =>
-		routeConnectionInternal(connection, components, bounds, cachedObstacles)
-	);
+	const spatialIndex = createRoutingIndex(components);
+	const routes: RoutedConnection[] = [];
+	for (const [routeIndex, connection] of connections.entries()) {
+		const route = routeConnectionInternal(connection, components, bounds, spatialIndex);
+		routes.push(route);
+		indexCompletedRoute(spatialIndex, route, connection, routeIndex);
+	}
 	validateUniversalWireContacts(connections, routes);
 	const horizontalBuckets = new Map<number, AxisSegment[]>();
 	const verticalBuckets = new Map<number, AxisSegment[]>();

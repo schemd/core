@@ -71,3 +71,23 @@ L2.out -> R2.in #purple [bezier marker-start=diamond marker-end=diamond-filled n
 
 	await expect(page.locator('figure')).toHaveScreenshot('collision-families.png');
 });
+
+test('open marker interiors expose arbitrary host backgrounds without trace bleed', async ({ page }) => {
+	await mountSchematic(
+		page,
+		`port:L1 "diamond" at (70,80) #blue
+port:R1 "triangle" at (450,80) #blue [orientation=left]
+port:L2 "open" at (70,180) #purple
+port:R2 "open" at (450,180) #purple [orientation=left]
+L1.out -> R1.in #blue [line marker-start=diamond marker-end=triangle net=SHAPES]
+L2.out -> R2.in #purple [ortho marker-start=open-arrow marker-end=open-arrow net=ARROWS]`,
+		{ width: 520, height: 260 },
+		'Transparent markers'
+	);
+	await page.addStyleTag({
+		content:
+			'html,body{background-color:#e2e8f0;background-image:linear-gradient(45deg,#cbd5e1 25%,transparent 25%,transparent 75%,#cbd5e1 75%),linear-gradient(45deg,#cbd5e1 25%,transparent 25%,transparent 75%,#cbd5e1 75%);background-position:0 0,10px 10px;background-size:20px 20px}'
+	});
+
+	await expect(page.locator('figure')).toHaveScreenshot('transparent-markers.png');
+});

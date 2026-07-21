@@ -54,6 +54,8 @@ Invalid component variants, duplicate options, unsupported rotations, bad ports,
 
 Signal segments that share an exact terminal are one net. Use `net=NAME` to join disconnected segments explicitly; the compiler assigns deterministic `$1`, `$2`, … identities to unnamed nets. Separate orthogonal nets receive bridge arcs at strict crossings, while same-net crossings remain continuous and every unbridgeable contact fails before rendering.
 
+Orthogonal routes reuse one document-level spatial index instead of rescanning component geometry. Earlier source-ordered wires contribute soft channel occupancy, and component/connector labels contribute hard readability bounds; shared-net channels remain free. Open arrow, triangle, and diamond markers are genuinely transparent on arbitrary host backgrounds, with the visible trace trimmed away beneath their interiors.
+
 ## Component inventory
 
 - Electrical: passives, diode and transistor families, ports, grounds, sources, junctions, test points, connectors, power symbols, switches, protection, amplifiers, resonators, meters, loads, and arbitrary side-pinned ICs.
@@ -123,6 +125,6 @@ Omitting `orientation` is byte-identical to the explicit legacy default `orienta
 
 ## Release verification
 
-After `bun install`, run `bun run test:visual:install` once to provision Chromium, then `bun run release:check` for type checking, 100% coverage, pixel goldens, build, gzip budget, and the reproducible benchmark report.
+After `bun install`, run `bun run test:visual:install` once to provision Chromium, then `bun run release:check` for type checking, 100% code coverage, bounded deterministic fuzzing, a 100%-kill targeted mutation gate, pixel goldens, build, gzip budget, and latency regression ceilings.
 
 [Official versioned documentation](https://schemd.johnowolabiidogun.dev/docs/0.3.0/overview) · [Changelog](./CHANGELOG.md) · [Roadmap](./ROADMAP.md) · [Issues](https://github.com/schemd/core/issues) · [MIT](./LICENSE)

@@ -39,6 +39,8 @@ export {
 	componentObstacleRectangle,
 	componentRectangle,
 	componentTextAnchors,
+	connectionLabelPoint,
+	connectionLabelRectangle,
 	distributedCoordinate,
 	enumerateComponentPorts,
 	positionIcPin,

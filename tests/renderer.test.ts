@@ -232,6 +232,36 @@ R2.out -> R3.in #blue [ortho marker-start=dot marker-end=arrow]`,
 		expect(interactive.match(/class="schematic-wire"/g)).toHaveLength(2);
 	});
 
+	test('renders open markers without surface fills or visible traces through their interiors', () => {
+		const markerFence = { bounds: { width: 480, height: 240 }, title: 'Transparent markers' };
+		const document = parseSchematic(
+			`port:L "L" at (80,120) #blue
+port:R "R" at (400,120) #blue
+L.out -> R.in #blue [line marker-start=diamond marker-end=triangle]`,
+			markerFence
+		);
+		const html = renderSchematic(document, markerFence);
+		expect(html).toContain('marker-triangle');
+		expect(html).toContain('marker-diamond');
+		expect(html).toContain('d="M0 1 11 6 0 11Z" fill="none"');
+		expect(html).not.toContain('fill="var(--schematic-surface');
+		expect(html).toContain('schematic-marker-carrier"');
+		expect(html).toContain('d="M 122 120 L 358 120" stroke-width="0"');
+		expect(html).toContain('d="M 134 120 L 346 120"');
+		const vertical = renderSchematic(
+			parseSchematic(
+				`port:T "T" at (240,68) #cyan [orientation=down]
+port:B "B" at (240,252) #cyan [orientation=down]
+T.out -> B.in #cyan [ortho marker-start=open-arrow marker-end=open-arrow]`,
+				{ bounds: { width: 480, height: 320 }, title: 'Vertical transparent markers' }
+			),
+			{ bounds: { width: 480, height: 320 }, title: 'Vertical transparent markers', mode: 'embedded-css' }
+		);
+		expect(vertical).toContain('.schematic-marker-carrier{stroke-width:0!important}');
+		expect(vertical).toContain('d="M 240 110 V 210" stroke-width="0"');
+		expect(vertical).toContain('d="M 240 119 V 201"');
+	});
+
 	test('reuses the polished qgate shell through one canonical definition', () => {
 		const minimal = renderSchematic(
 			parseSchematic('qgate:Q1 "RX" at (120, 100) #purple', fence),

@@ -11,6 +11,7 @@
 import {
 	classicalGateHeight,
 	componentTextAnchors,
+	connectionLabelPoint,
 	distributedCoordinate,
 	enumerateComponentPorts,
 	formatNumber as svgNumber,
@@ -49,7 +50,9 @@ import {
 	type SchematicComponent,
 	type SchematicConnection,
 	type SchematicDocument,
+	type SchematicPoint,
 	type SchematicSemanticHook,
+	type SchematicSignalMarker,
 	type SchemdOutputMode,
 	type TransistorComponent,
 	type UmlClassComponent,
@@ -68,7 +71,7 @@ export const MAX_SVG_OUTPUT_BYTES = MAX_SCHEMATIC_SVG_OUTPUT_BYTES;
 
 /** Minimal theme-aware vector styles embedded by non-default output modes. */
 const STATIC_SVG_STYLES =
-	'.schematic-token{fill:none;stroke:var(--schematic-vector,var(--schematic-vector-fallback,currentColor));stroke-linecap:round;stroke-linejoin:round;stroke-width:var(--schematic-stroke-width,1.65);vector-effect:non-scaling-stroke}.schematic-node-fill{fill:var(--schematic-vector,var(--schematic-vector-fallback,currentColor))}.schematic-designator,.schematic-label,.schematic-gate-symbol,.schematic-quantum-detail,.schematic-pin-label,.schematic-uml-text,.schematic-connection-label{fill:currentColor}.schematic-uml-row{font-size:12px}.schematic-uml-stereotype{font-size:11px}.schematic-connection-label{font-size:11px;paint-order:stroke;stroke:var(--schematic-surface,#fff);stroke-width:4;stroke-linejoin:round}.schematic-surface{fill:var(--schematic-surface,transparent)}.schematic-grid-line{fill:none;stroke:var(--schematic-grid,currentColor);stroke-width:1;opacity:.12;vector-effect:non-scaling-stroke}';
+	'.schematic-token{fill:none;stroke:var(--schematic-vector,var(--schematic-vector-fallback,currentColor));stroke-linecap:round;stroke-linejoin:round;stroke-width:var(--schematic-stroke-width,1.65);vector-effect:non-scaling-stroke}.schematic-marker-carrier{stroke-width:0!important}.schematic-node-fill{fill:var(--schematic-vector,var(--schematic-vector-fallback,currentColor))}.schematic-designator,.schematic-label,.schematic-gate-symbol,.schematic-quantum-detail,.schematic-pin-label,.schematic-uml-text,.schematic-connection-label{fill:currentColor}.schematic-uml-row{font-size:12px}.schematic-uml-stereotype{font-size:11px}.schematic-connection-label{font-size:11px;paint-order:stroke;stroke:var(--schematic-surface,#fff);stroke-width:4;stroke-linejoin:round}.schematic-surface{fill:var(--schematic-surface,transparent)}.schematic-grid-line{fill:none;stroke:var(--schematic-grid,currentColor);stroke-width:1;opacity:.12;vector-effect:non-scaling-stroke}';
 
 /** Keyboard and pointer hotspot rules emitted only by `full` mode. */
 const HOOK_SVG_STYLES =
@@ -1044,13 +1047,14 @@ function connectionMarkup(
 	const relation = connection.relation ?? 'signal';
 	const accessibility = ` tabindex="0" role="group" aria-label="${escapeXml(relation)} from ${source} to ${target}"`;
 	const vectorId = ` id="${traceId}"`;
-	const markerAttributes = connectionMarkerAttributes(connection, idPrefix);
+	const markerAttributes = connectionMarkerAttributes(connection, idPrefix, false);
+	const markerCarrier = openMarkerCarrier(connection, routed, idPrefix);
 	const glow = `<use class="schematic-glow-layer" href="#${traceId}" filter="url(#${glowId})" aria-hidden="true" pointer-events="none" />`;
 	const endpoint =
 		relation === 'signal' && connection.markerEnd === 'none'
 			? `<circle ${colorAttributes(connection.color, 'schematic-node-fill')} cx="${svgNumber(end.x)}" cy="${svgNumber(end.y)}" r="3" />`
 			: '';
-	return `<g class="schematic-wire${signalClass}"${dataAttributes}${accessibility}><path${vectorId} ${colorAttributes(connection.color, `schematic-trace${signalClass}`)} d="${routed.d}"${markerAttributes} />${glow}${endpoint}${connectionLabelMarkup(connection, routed)}</g>`;
+	return `<g class="schematic-wire${signalClass}"${dataAttributes}${accessibility}>${markerCarrier}<path${vectorId} ${colorAttributes(connection.color, `schematic-trace${signalClass}`)} d="${visibleConnectionPath(connection, routed)}"${markerAttributes} />${glow}${endpoint}${connectionLabelMarkup(connection, routed)}</g>`;
 }
 
 /**
@@ -1060,43 +1064,63 @@ function connectionMarkup(
  * @param idPrefix - Diagram-local marker namespace.
  * @returns Zero, one, or two SVG marker attributes.
  */
-function connectionMarkerAttributes(connection: SchematicConnection, idPrefix: string): string {
-	const start = connection.markerStart;
-	const end = connection.markerEnd;
-	return `${start === 'none' ? '' : ` marker-start="url(#${idPrefix}-marker-${start})"`}${end === 'none' ? '' : ` marker-end="url(#${idPrefix}-marker-${end})"`}${connection.dashed === true ? ' stroke-dasharray="7 5"' : ''}`;
+function isOpenMarker(marker: SchematicSignalMarker): boolean {
+	return marker === 'open-arrow' || marker === 'triangle' || marker === 'diamond';
 }
 
-/** Locate the half-length point of a routed polyline for connector labels. */
-function connectionLabelPoint(route: RoutedConnection): { x: number; y: number } {
-	if (route.curve === 'bezier' && route.points.length >= 4) {
-		const a = route.points[0]!;
-		const b = route.points[1]!;
-		const c = route.points[2]!;
-		const d = route.points[3]!;
-		return {
-			x: (a.x + 3 * b.x + 3 * c.x + d.x) / 8,
-			y: (a.y + 3 * b.y + 3 * c.y + d.y) / 8
-		};
+function connectionMarkerAttributes(
+	connection: SchematicConnection,
+	idPrefix: string,
+	open: boolean
+): string {
+	const start = isOpenMarker(connection.markerStart) === open ? connection.markerStart : 'none';
+	const end = isOpenMarker(connection.markerEnd) === open ? connection.markerEnd : 'none';
+	return `${start === 'none' ? '' : ` marker-start="url(#${idPrefix}-marker-${start})"`}${end === 'none' ? '' : ` marker-end="url(#${idPrefix}-marker-${end})"`}${!open && connection.dashed === true ? ' stroke-dasharray="7 5"' : ''}`;
+}
+
+/** Trim the visible trace beneath background-independent open markers. */
+function visibleConnectionPath(connection: SchematicConnection, route: RoutedConnection): string {
+	const startTrim = isOpenMarker(connection.markerStart)
+		? connection.markerStart === 'open-arrow'
+			? 9
+			: 12
+		: 0;
+	const endTrim = isOpenMarker(connection.markerEnd)
+		? connection.markerEnd === 'open-arrow'
+			? 9
+			: 12
+		: 0;
+	if (startTrim === 0 && endTrim === 0) return route.d;
+	const inset = (endpoint: SchematicPoint, adjacent: SchematicPoint, distance: number) => {
+		const dx = adjacent.x - endpoint.x;
+		const dy = adjacent.y - endpoint.y;
+		const magnitude = Math.hypot(dx, dy);
+		const scale = Math.min(1, distance / magnitude);
+		return { x: endpoint.x + dx * scale, y: endpoint.y + dy * scale };
+	};
+	let path = route.d;
+	if (startTrim > 0) {
+		const start = inset(route.points[0]!, route.points[1]!, startTrim);
+		path = path.replace(/^M -?[\d.]+ -?[\d.]+/, `M ${svgNumber(start.x)} ${svgNumber(start.y)}`);
 	}
-	let total = 0;
-	for (let index = 1; index < route.points.length; index += 1) {
-		total +=
-			Math.abs(route.points[index]!.x - route.points[index - 1]!.x) +
-			Math.abs(route.points[index]!.y - route.points[index - 1]!.y);
+	if (endTrim > 0) {
+		const end = inset(route.points.at(-1)!, route.points.at(-2)!, endTrim);
+		if (/ H -?[\d.]+$/.test(path)) path = path.replace(/-?[\d.]+$/, svgNumber(end.x));
+		else if (/ V -?[\d.]+$/.test(path)) path = path.replace(/-?[\d.]+$/, svgNumber(end.y));
+		else path = path.replace(/-?[\d.]+ -?[\d.]+$/, `${svgNumber(end.x)} ${svgNumber(end.y)}`);
 	}
-	let remaining = total / 2;
-	for (let index = 1; index < route.points.length; index += 1) {
-		const start = route.points[index - 1]!;
-		const end = route.points[index]!;
-		const length = Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
-		if (remaining <= length) {
-			const ratio = length === 0 ? 0 : remaining / length;
-			return { x: start.x + (end.x - start.x) * ratio, y: start.y + (end.y - start.y) * ratio };
-		}
-		remaining -= length;
-	}
-	/* v8 ignore next -- finite routes with at least two points always contain their half length. */
-	return route.points.at(-1)!;
+	return path;
+}
+
+function openMarkerCarrier(
+	connection: SchematicConnection,
+	route: RoutedConnection,
+	idPrefix: string
+): string {
+	const markers = connectionMarkerAttributes(connection, idPrefix, true);
+	return markers === ''
+		? ''
+		: `<path ${colorAttributes(connection.color, 'schematic-marker-carrier')} d="${route.d}" stroke-width="0"${markers} />`;
 }
 
 /** Render an optional UML or signal connector label with an opaque text halo. */
@@ -1153,20 +1177,24 @@ function compactConnectionMarkup(
 		endpoints: string[];
 		/** Individually positioned connector labels. */
 		labels: string[];
+		/** Zero-width paths that place background-independent open markers. */
+		carriers: string[];
 	}
 	const batches = new Map<string, Batch>();
 	for (const [index, connection] of connections.entries()) {
-		const markerAttributes = connectionMarkerAttributes(connection, idPrefix);
+		const markerAttributes = connectionMarkerAttributes(connection, idPrefix, false);
 		const signalKind = connection.signalKind ?? 'electrical';
 		const key = `${colorKey(connection.color)}|${markerAttributes}|${signalKind}|${connection.width ?? 1}`;
 		let batch = batches.get(key);
 		if (batch === undefined) {
-			batch = { color: connection.color, markerAttributes, signalKind, traces: [], endpoints: [], labels: [] };
+			batch = { color: connection.color, markerAttributes, signalKind, traces: [], endpoints: [], labels: [], carriers: [] };
 			batches.set(key, batch);
 		}
 		const routed = routes[index]!;
 		const end = routed.points.at(-1)!;
-		batch.traces.push(routed.d);
+		batch.traces.push(visibleConnectionPath(connection, routed));
+		const carrier = openMarkerCarrier(connection, routed, idPrefix);
+		if (carrier !== '') batch.carriers.push(carrier);
 		/* v8 ignore next -- parsed documents always materialize relation; fallback preserves old typed ASTs. */
 		if ((connection.relation ?? 'signal') === 'signal' && connection.markerEnd === 'none') {
 			batch.endpoints.push(
@@ -1183,9 +1211,10 @@ function compactConnectionMarkup(
 		const trace = `<path${embedVisuals ? ` id="${traceId}"` : ''} ${tracePaint} d="${batch.traces.join(' ')}"${batch.markerAttributes} />`;
 		const endpoints = batch.endpoints.length === 0 ? '' : `<path ${nodePaint} d="${batch.endpoints.join(' ')}" />`;
 		const labels = batch.labels.join('');
-		if (!embedVisuals) return trace + endpoints + labels;
+		const carriers = batch.carriers.join('');
+		if (!embedVisuals) return carriers + trace + endpoints + labels;
 		/* Embedded-css output stays role="img": hover-only groups must not enter the tab order. */
-		return `<g class="schematic-wire">${trace}<use class="schematic-glow-layer" href="#${traceId}" filter="url(#${glowId})" aria-hidden="true" pointer-events="none" />${endpoints}${labels}</g>`;
+		return `<g class="schematic-wire">${carriers}${trace}<use class="schematic-glow-layer" href="#${traceId}" filter="url(#${glowId})" aria-hidden="true" pointer-events="none" />${endpoints}${labels}</g>`;
 	}).join('');
 }
 
@@ -1395,7 +1424,7 @@ export function renderSchematic(
 	const usedMarkers = new Set(
 		document.connections.flatMap((connection) => [connection.markerStart, connection.markerEnd])
 	);
-	const markerDefinitions = `${usedMarkers.has('arrow') ? `<marker id="${safePrefix}-marker-arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 0 8 4 0 8Z" fill="context-stroke" /></marker>` : ''}${usedMarkers.has('open-arrow') ? `<marker id="${safePrefix}-marker-open-arrow" viewBox="0 0 9 10" refX="9" refY="5" markerWidth="9" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 0 9 5 0 10" fill="none" stroke="context-stroke" stroke-width="1.5" /></marker>` : ''}${usedMarkers.has('dot') ? `<marker id="${safePrefix}-marker-dot" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse"><circle cx="4" cy="4" r="3" fill="context-stroke" /></marker>` : ''}${usedMarkers.has('triangle') ? `<marker id="${safePrefix}-marker-triangle" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 1 11 6 0 11Z" fill="var(--schematic-surface,#fff)" stroke="context-stroke" stroke-width="1.5" /></marker>` : ''}${usedMarkers.has('diamond') ? `<marker id="${safePrefix}-marker-diamond" viewBox="0 0 13 12" refX="12" refY="6" markerWidth="13" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 6 6 1 12 6 6 11Z" fill="var(--schematic-surface,#fff)" stroke="context-stroke" stroke-width="1.5" /></marker>` : ''}${usedMarkers.has('diamond-filled') ? `<marker id="${safePrefix}-marker-diamond-filled" viewBox="0 0 13 12" refX="12" refY="6" markerWidth="13" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 6 6 1 12 6 6 11Z" fill="context-stroke" stroke="context-stroke" /></marker>` : ''}`;
+	const markerDefinitions = `${usedMarkers.has('arrow') ? `<marker id="${safePrefix}-marker-arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 0 8 4 0 8Z" fill="context-stroke" /></marker>` : ''}${usedMarkers.has('open-arrow') ? `<marker id="${safePrefix}-marker-open-arrow" viewBox="0 0 9 10" refX="9" refY="5" markerWidth="9" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 0 9 5 0 10" fill="none" stroke="context-stroke" stroke-width="1.5" /></marker>` : ''}${usedMarkers.has('dot') ? `<marker id="${safePrefix}-marker-dot" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse"><circle cx="4" cy="4" r="3" fill="context-stroke" /></marker>` : ''}${usedMarkers.has('triangle') ? `<marker id="${safePrefix}-marker-triangle" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 1 11 6 0 11Z" fill="none" stroke="context-stroke" stroke-width="1.5" /></marker>` : ''}${usedMarkers.has('diamond') ? `<marker id="${safePrefix}-marker-diamond" viewBox="0 0 13 12" refX="12" refY="6" markerWidth="13" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 6 6 1 12 6 6 11Z" fill="none" stroke="context-stroke" stroke-width="1.5" /></marker>` : ''}${usedMarkers.has('diamond-filled') ? `<marker id="${safePrefix}-marker-diamond-filled" viewBox="0 0 13 12" refX="12" refY="6" markerWidth="13" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse" overflow="visible"><path d="M0 6 6 1 12 6 6 11Z" fill="context-stroke" stroke="context-stroke" /></marker>` : ''}`;
 	const embeddedDefinitions = styles
 		? `<style>${STATIC_SVG_STYLES}${hookStyles}${interactionStyles}</style><pattern id="${gridId}" width="20" height="20" patternUnits="userSpaceOnUse"><path class="schematic-grid-line" d="M20 0H0V20" /></pattern>${glowFilter}`
 		: '';

@@ -3,6 +3,11 @@ import { performance } from 'node:perf_hooks';
 import { compileSchematic } from '../dist/index.js';
 
 const encoder = new TextEncoder();
+const MAX_MEDIAN_MS = new Map([
+	['simple-rc', 2],
+	['maximum-512-components', 30],
+	['dense-16x16-routing', 75]
+]);
 
 const simpleSource = `source:VIN "AC" at (90,150) #blue [type=voltage-ac]
 resistor:R1 "1 k\\Omega" at (280,150) #amber
@@ -107,3 +112,11 @@ const report = {
 };
 
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+for (const benchmark of report.benchmarks) {
+	const limit = MAX_MEDIAN_MS.get(benchmark.name);
+	if (limit !== undefined && benchmark.medianMs > limit) {
+		throw new Error(
+			`${benchmark.name} median ${benchmark.medianMs} ms exceeds the ${limit} ms regression ceiling.`
+		);
+	}
+}

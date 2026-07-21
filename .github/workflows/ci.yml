@@ -27,6 +27,11 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Setup supported Node.js runtime
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
       - name: Install dependencies
         run: bun ci
 
@@ -50,6 +55,9 @@ jobs:
           echo '```txt' >> "$GITHUB_STEP_SUMMARY"
           bun run test:coverage | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Kill critical-path mutants
+        run: bun run test:mutation
 
       - name: Verify Chromium visual goldens
         run: bun run test:visual
