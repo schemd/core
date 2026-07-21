@@ -6,7 +6,7 @@
 
 `schemd`—pronounced like “skemd” (`/skɛmd/`)—is a strict, deterministic text-to-SVG compiler for electrical, digital, quantum, and UML diagrams. It has zero runtime dependencies and does not use a DOM, Canvas, browser layout, external fonts, raster assets, or `getBBox()`.
 
-Version 0.3.1 requires Node.js 24 or newer. The compiler is held below an enforced 30 KiB gzip ceiling.
+Version 0.3.2 requires Node.js 24 or newer. The compiler is held below an enforced 30 KiB gzip ceiling.
 
 ## Install
 
@@ -51,6 +51,8 @@ SOURCE.port -> TARGET.port color [line|bezier|ortho options]
 ```
 
 Invalid component variants, duplicate options, unsupported rotations, bad ports, incompatible bus widths, unsafe colors, malformed markup, and out-of-bounds geometry fail with stable diagnostics before SVG emission.
+
+Signal segments that share an exact terminal are one net. Use `net=NAME` to join disconnected segments explicitly; the compiler assigns deterministic `$1`, `$2`, … identities to unnamed nets. Separate orthogonal nets receive bridge arcs at strict crossings, while same-net crossings remain continuous and every unbridgeable contact fails before rendering.
 
 ## Component inventory
 
@@ -117,6 +119,10 @@ All modes are deterministic and use diagram-local IDs. Hosts should use a unique
 
 ## Compatibility
 
-Omitting `orientation` is byte-identical to the explicit legacy default `orientation=right`. Existing 0.2.x declarations, port aliases, UML stereotypes, output modes, and compiler entry points continue to work. New AST members are additive; consumers with exhaustive component-kind switches must handle the new discriminants.
+Omitting `orientation` is byte-identical to the explicit legacy default `orientation=right`. Existing 0.2.x syntax, port aliases, UML stereotypes, output modes, and compiler entry points remain supported. New AST members are additive; consumers with exhaustive component-kind switches must handle the new discriminants. The 0.3.2 geometry contract is intentionally stricter: documents that previously rendered overlapping bodies, body-clipping manual routes, or ambiguous separate-net contacts now fail with diagnostics and must be repositioned, routed orthogonally, or assigned a shared net.
+
+## Release verification
+
+After `bun install`, run `bun run test:visual:install` once to provision Chromium, then `bun run release:check` for type checking, 100% coverage, pixel goldens, build, gzip budget, and the reproducible benchmark report.
 
 [Official versioned documentation](https://schemd.johnowolabiidogun.dev/docs/0.3.0/overview) · [Changelog](./CHANGELOG.md) · [Roadmap](./ROADMAP.md) · [Issues](https://github.com/schemd/core/issues) · [MIT](./LICENSE)

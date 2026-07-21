@@ -40,7 +40,9 @@ describe('source map', () => {
 			{ id: 'A', line: 2 },
 			{ id: 'R1', line: 4 }
 		]);
-		expect(result.sourceMap.wires).toEqual([{ source: 'A.out', target: 'R1.in', line: 5 }]);
+		expect(result.sourceMap.wires).toEqual([
+			{ source: 'A.out', target: 'R1.in', line: 5, netId: '$1' }
+		]);
 	});
 
 	test('full mode emits data-source-line on node and wire groups', () => {

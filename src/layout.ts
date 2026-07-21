@@ -77,6 +77,15 @@ interface AxisSegment {
 	readonly orientation: 'horizontal' | 'vertical';
 }
 
+/** Straight span used by universal wire-contact validation. */
+interface TraceSegment {
+	readonly id: number;
+	readonly routeIndex: number;
+	readonly start: SchematicPoint;
+	readonly end: SchematicPoint;
+	readonly orthogonal: boolean;
+}
+
 /** External text-row baselines and fitted widths relative to a component origin. */
 export interface ComponentTextAnchors {
 	/** Vertical designator baseline offset. */
@@ -260,7 +269,7 @@ const TRANSISTOR_LOWER_PORTS = new Set(['emitter', 'source', 'e', 's']);
  * @param value - Computed viewBox coordinate.
  * @returns Compact decimal representation without insignificant trailing zeroes.
  */
-function formatNumber(value: number): string {
+export function formatNumber(value: number): string {
 	const rounded = Math.abs(value) < 0.0005 ? 0 : Number(value.toFixed(3));
 	return String(rounded);
 }
@@ -330,22 +339,22 @@ export function quantumGateDimensions(component: QuantumGateComponent): {
  * @param component - Component to classify.
  * @returns Whether its kind belongs to the classical gate registry.
  */
-function isClassicalGate(component: SchematicComponent): component is ClassicalGateComponent {
+export function isClassicalGate(component: SchematicComponent): component is ClassicalGateComponent {
 	return CLASSICAL_GATE_KINDS.includes(component.kind as ClassicalGateComponent['kind']);
 }
 
-function isDigitalComponent(component: SchematicComponent): component is DigitalComponent {
+export function isDigitalComponent(component: SchematicComponent): component is DigitalComponent {
 	return DIGITAL_COMPONENT_KINDS.includes(component.kind as DigitalComponent['kind']);
 }
 
-function isQuantumSpecial(
+export function isQuantumSpecial(
 	component: SchematicComponent
 ): component is QuantumSpecialComponent {
 	return QUANTUM_SPECIAL_KINDS.includes(component.kind as QuantumSpecialComponent['kind']);
 }
 
 /** Narrow a schematic component to a first-class UML node. */
-function isUmlComponent(component: SchematicComponent): component is UmlComponent {
+export function isUmlComponent(component: SchematicComponent): component is UmlComponent {
 	return UML_COMPONENT_KINDS.includes(component.kind as UmlComponent['kind']);
 }
 
@@ -1109,10 +1118,10 @@ export function componentObstacleRectangle(
 }
 
 /**
- * Detect a strict interior intersection between an axis-aligned segment and AABB.
+ * Detect a strict interior intersection between an arbitrary line segment and AABB.
  *
- * Points exactly on a clearance boundary are legal. Callers only pass horizontal
- * or vertical segments; any non-horizontal segment follows the vertical branch.
+ * Liang-Barsky clipping keeps boundary-tangent traces legal while covering
+ * diagonal manual routes as rigorously as orthogonal router segments.
  *
  * @param start - Segment origin.
  * @param end - Segment destination.
@@ -1132,11 +1141,61 @@ function segmentIntersectsRectangle(
 			Math.min(start.x, end.x) < rectangle.maxX
 		);
 	}
+	if (start.x === end.x) {
+		return (
+			start.x > rectangle.minX &&
+			start.x < rectangle.maxX &&
+			Math.max(start.y, end.y) > rectangle.minY &&
+			Math.min(start.y, end.y) < rectangle.maxY
+		);
+	}
+	let minimum = 0;
+	let maximum = 1;
+	for (const [origin, delta, low, high] of [
+		[start.x, end.x - start.x, rectangle.minX, rectangle.maxX],
+		[start.y, end.y - start.y, rectangle.minY, rectangle.maxY]
+	] as const) {
+		const first = (low - origin) / delta;
+		const second = (high - origin) / delta;
+		minimum = Math.max(minimum, Math.min(first, second));
+		maximum = Math.min(maximum, Math.max(first, second));
+		if (minimum >= maximum) return false;
+	}
+	return maximum > 0 && minimum < 1;
+}
+
+/** Conservative geometrically bounded subdivision test for a cubic Bézier against an AABB. */
+function cubicIntersectsRectangle(
+	points: readonly [SchematicPoint, SchematicPoint, SchematicPoint, SchematicPoint],
+	rectangle: SchematicRectangle
+): boolean {
+	const minX = Math.min(...points.map((point) => point.x));
+	const minY = Math.min(...points.map((point) => point.y));
+	const maxX = Math.max(...points.map((point) => point.x));
+	const maxY = Math.max(...points.map((point) => point.y));
+	if (
+		maxX <= rectangle.minX ||
+		minX >= rectangle.maxX ||
+		maxY <= rectangle.minY ||
+		minY >= rectangle.maxY
+	) {
+		return false;
+	}
+	if (maxX - minX <= 0.25 && maxY - minY <= 0.25) return true;
+	const midpoint = (left: SchematicPoint, right: SchematicPoint): SchematicPoint => ({
+		x: (left.x + right.x) / 2,
+		y: (left.y + right.y) / 2
+	});
+	const [a, b, c, d] = points;
+	const ab = midpoint(a, b);
+	const bc = midpoint(b, c);
+	const cd = midpoint(c, d);
+	const abc = midpoint(ab, bc);
+	const bcd = midpoint(bc, cd);
+	const center = midpoint(abc, bcd);
 	return (
-		start.x > rectangle.minX &&
-		start.x < rectangle.maxX &&
-		Math.max(start.y, end.y) > rectangle.minY &&
-		Math.min(start.y, end.y) < rectangle.maxY
+		cubicIntersectsRectangle([a, ab, abc, center], rectangle) ||
+		cubicIntersectsRectangle([center, bcd, cd, d], rectangle)
 	);
 }
 
@@ -1406,6 +1465,71 @@ interface CachedObstacle {
 	readonly body: SchematicRectangle;
 }
 
+/** Conservative along-path length and half-width for one SVG signal marker. */
+function markerCollisionSize(
+	marker: SchematicConnection['markerStart']
+): { readonly length: number; readonly radius: number } {
+	switch (marker) {
+		case 'dot':
+			return { length: 4, radius: 4 };
+		case 'arrow':
+			return { length: 8, radius: 4 };
+		case 'open-arrow':
+			return { length: 9, radius: 5 };
+		case 'triangle':
+		case 'diamond':
+		case 'diamond-filled':
+			return { length: 12, radius: 6 };
+		default:
+			return { length: 0, radius: 0 };
+	}
+}
+
+/** Validate transformed marker footprints against every unrelated component body. */
+function validateMarkerCollisions(
+	connection: SchematicConnection,
+	route: RoutedConnection,
+	obstacles: readonly CachedObstacle[],
+	fromId: string,
+	toId: string
+): RoutedConnection {
+	if (connection.markerStart === 'none' && connection.markerEnd === 'none') return route;
+	for (const [atStart, marker] of [
+		[true, connection.markerStart],
+		[false, connection.markerEnd]
+	] as const) {
+		const size = markerCollisionSize(marker);
+		if (size.length === 0) continue;
+		const endpoint = atStart ? route.points[0]! : route.points.at(-1)!;
+		const adjacent = atStart ? route.points[1]! : route.points.at(-2)!;
+		const dx = adjacent.x - endpoint.x;
+		const dy = adjacent.y - endpoint.y;
+		const magnitude = Math.hypot(dx, dy);
+		/* v8 ignore next -- validated routes always contain a non-degenerate endpoint span. */
+		if (magnitude === 0) continue;
+		const inward = {
+			x: endpoint.x + (dx / magnitude) * size.length,
+			y: endpoint.y + (dy / magnitude) * size.length
+		};
+		for (const obstacle of obstacles) {
+			if (obstacle.id === fromId || obstacle.id === toId) continue;
+			const expanded = {
+				minX: obstacle.body.minX - size.radius,
+				minY: obstacle.body.minY - size.radius,
+				maxX: obstacle.body.maxX + size.radius,
+				maxY: obstacle.body.maxY + size.radius
+			};
+			if (segmentIntersectsRectangle(endpoint, inward, expanded)) {
+				throw new SchematicSyntaxError(
+					`${marker} marker intersects ${obstacle.id}; use ortho or move the obstacle.`,
+					connection.line
+				);
+			}
+		}
+	}
+	return route;
+}
+
 /** Whether aligned terminal normals point directly toward one another. */
 function endpointsFaceEachOther(
 	from: { readonly point: SchematicPoint; readonly normal: SchematicPoint },
@@ -1439,24 +1563,36 @@ function routeConnectionInternal(
 	const sy = formatNumber(start.y);
 	const ex = formatNumber(end.x);
 	const ey = formatNumber(end.y);
+	const obstacleCache =
+		cachedObstacles ??
+		Array.from(components.values(), (component) => ({
+			id: component.id,
+			expanded: componentObstacleRectangle(component),
+			body: componentObstacleRectangle(component, 0)
+		}));
 	if (connection.curve === 'bezier') {
 		const middleX = (start.x + end.x) / 2;
 		const controlA = { x: middleX, y: start.y };
 		const controlB = { x: middleX, y: end.y };
-		return {
+		for (const obstacle of obstacleCache) {
+			if (
+				obstacle.id !== from.component.id &&
+				obstacle.id !== to.component.id &&
+				cubicIntersectsRectangle([start, controlA, controlB, end], obstacle.body)
+			) {
+				throw new SchematicSyntaxError(
+					`Bézier route intersects ${obstacle.id}; use an orthogonal route or move the obstacle.`,
+					connection.line
+				);
+			}
+		}
+		return validateMarkerCollisions(connection, {
 			curve: 'bezier',
 			d: `M ${sx} ${sy} C ${formatNumber(controlA.x)} ${formatNumber(controlA.y)}, ${formatNumber(controlB.x)} ${formatNumber(controlB.y)}, ${ex} ${ey}`,
 			points: [start, controlA, controlB, end]
-		};
+		}, obstacleCache, from.component.id, to.component.id);
 	}
 	if (connection.curve === 'ortho') {
-		const obstacleCache =
-			cachedObstacles ??
-			Array.from(components.values(), (component) => ({
-				id: component.id,
-				expanded: componentObstacleRectangle(component),
-				body: componentObstacleRectangle(component, 0)
-			}));
 		if (
 			from.component.id !== to.component.id &&
 			endpointsFaceEachOther(from, to) &&
@@ -1467,7 +1603,13 @@ function routeConnectionInternal(
 					segmentIntersectsRectangle(start, end, entry.expanded)
 			)
 		) {
-			return { curve: 'ortho', d: orthogonalPath([start, end]), points: [start, end] };
+			return validateMarkerCollisions(
+				connection,
+				{ curve: 'ortho', d: orthogonalPath([start, end]), points: [start, end] },
+				obstacleCache,
+				from.component.id,
+				to.component.id
+			);
 		}
 		const fromObstacle = componentObstacleRectangle(from.component);
 		const toObstacle = componentObstacleRectangle(to.component);
@@ -1526,13 +1668,31 @@ function routeConnectionInternal(
 				}
 			}
 		}
-		return {
+		return validateMarkerCollisions(connection, {
 			curve: 'ortho',
 			d: orthogonalPath(points),
 			points: points as [SchematicPoint, SchematicPoint, ...SchematicPoint[]]
-		};
+		}, obstacleCache, from.component.id, to.component.id);
 	}
-	return { curve: 'line', d: `M ${sx} ${sy} L ${ex} ${ey}`, points: [start, end] };
+	for (const obstacle of obstacleCache) {
+		if (
+			obstacle.id !== from.component.id &&
+			obstacle.id !== to.component.id &&
+			segmentIntersectsRectangle(start, end, obstacle.body)
+		) {
+			throw new SchematicSyntaxError(
+				`Line route intersects ${obstacle.id}; use an orthogonal route or move the obstacle.`,
+				connection.line
+			);
+		}
+	}
+	return validateMarkerCollisions(
+		connection,
+		{ curve: 'line', d: `M ${sx} ${sy} L ${ex} ${ey}`, points: [start, end] },
+		obstacleCache,
+		from.component.id,
+		to.component.id
+	);
 }
 
 /**
@@ -1549,6 +1709,189 @@ export function routeConnection(
 	bounds?: SchematicBounds
 ): RoutedConnection {
 	return routeConnectionInternal(connection, components, bounds, undefined);
+}
+
+/** Whether two connection records resolve to the same electrical topology. */
+function connectionsShareNet(left: SchematicConnection, right: SchematicConnection): boolean {
+	if (left.netId !== undefined && right.netId !== undefined) return left.netId === right.netId;
+	if (left.net !== undefined && right.net !== undefined && left.net === right.net) return true;
+	const leftEndpoints = [
+		`${left.from.componentId}.${left.from.port}`,
+		`${left.to.componentId}.${left.to.port}`
+	];
+	return leftEndpoints.includes(`${right.from.componentId}.${right.from.port}`) ||
+		leftEndpoints.includes(`${right.to.componentId}.${right.to.port}`);
+}
+
+/** Internal pin-to-pin fixture routes may coexist inside one owning component body. */
+function connectionsAreInternalToSameComponent(
+	left: SchematicConnection,
+	right: SchematicConnection
+): boolean {
+	return (
+		left.from.componentId === left.to.componentId &&
+		right.from.componentId === right.to.componentId &&
+		left.from.componentId === right.from.componentId
+	);
+}
+
+/** Deterministically flatten one routed path for universal contact tests. */
+function traceSegments(route: RoutedConnection, routeIndex: number, firstId: number): TraceSegment[] {
+	let points: readonly SchematicPoint[] = route.points;
+	if (route.curve === 'bezier') {
+		const a = route.points[0]!;
+		const b = route.points[1]!;
+		const c = route.points[2]!;
+		const d = route.points[3]!;
+		const flattened: SchematicPoint[] = [];
+		for (let step = 0; step <= 24; step += 1) {
+			const t = step / 24;
+			const inverse = 1 - t;
+			flattened.push({
+				x:
+					inverse ** 3 * a.x +
+					3 * inverse ** 2 * t * b.x +
+					3 * inverse * t ** 2 * c.x +
+					t ** 3 * d.x,
+				y:
+					inverse ** 3 * a.y +
+					3 * inverse ** 2 * t * b.y +
+					3 * inverse * t ** 2 * c.y +
+					t ** 3 * d.y
+			});
+		}
+		points = flattened;
+	}
+	const segments: TraceSegment[] = [];
+	for (let index = 1; index < points.length; index += 1) {
+		const start = points[index - 1]!;
+		const end = points[index]!;
+		if (start.x === end.x && start.y === end.y) continue;
+		segments.push({
+			id: firstId + segments.length,
+			routeIndex,
+			start,
+			end,
+			orthogonal: route.curve === 'ortho'
+		});
+	}
+	return segments;
+}
+
+/** Classify any inclusive contact between two finite line segments. */
+function segmentContact(
+	left: TraceSegment,
+	right: TraceSegment
+): { readonly overlap: boolean; readonly strict: boolean } | undefined {
+	const rx = left.end.x - left.start.x;
+	const ry = left.end.y - left.start.y;
+	const sx = right.end.x - right.start.x;
+	const sy = right.end.y - right.start.y;
+	const qx = right.start.x - left.start.x;
+	const qy = right.start.y - left.start.y;
+	const denominator = rx * sy - ry * sx;
+	const epsilon = 1e-9;
+	if (Math.abs(denominator) <= epsilon) {
+		if (Math.abs(qx * ry - qy * rx) > epsilon) return undefined;
+		const useX = Math.abs(rx) >= Math.abs(ry);
+		const leftStart = useX ? left.start.x : left.start.y;
+		const leftEnd = useX ? left.end.x : left.end.y;
+		const rightStart = useX ? right.start.x : right.start.y;
+		const rightEnd = useX ? right.end.x : right.end.y;
+		const low = Math.max(Math.min(leftStart, leftEnd), Math.min(rightStart, rightEnd));
+		const high = Math.min(Math.max(leftStart, leftEnd), Math.max(rightStart, rightEnd));
+		if (high < low - epsilon) return undefined;
+		return { overlap: high > low + epsilon, strict: false };
+	}
+	const t = (qx * sy - qy * sx) / denominator;
+	const u = (qx * ry - qy * rx) / denominator;
+	if (t < -epsilon || t > 1 + epsilon || u < -epsilon || u > 1 + epsilon) return undefined;
+	return {
+		overlap: false,
+		strict: t > epsilon && t < 1 - epsilon && u > epsilon && u < 1 - epsilon
+	};
+}
+
+/**
+ * Reject every separate-net contact that cannot receive an orthogonal bridge.
+ *
+ * A one-dimensional spatial hash bounds comparisons without allocating a full
+ * viewBox grid; exact y-range and segment predicates remove bucket false positives.
+ */
+function validateUniversalWireContacts(
+	connections: readonly SchematicConnection[],
+	routes: readonly RoutedConnection[]
+): void {
+	if (routes.every((route) => route.curve === 'ortho')) return;
+	const buckets = new Map<number, TraceSegment[]>();
+	let nextSegmentId = 0;
+	for (let routeIndex = 0; routeIndex < routes.length; routeIndex += 1) {
+		const segments = traceSegments(routes[routeIndex]!, routeIndex, nextSegmentId);
+		nextSegmentId += segments.length;
+		for (const segment of segments) {
+			const checked = new Set<number>();
+			const minimumBucket = Math.floor(
+				Math.min(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE
+			);
+			const maximumBucket = Math.floor(
+				Math.max(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE
+			);
+			for (let bucket = minimumBucket; bucket <= maximumBucket; bucket += 1) {
+				for (const previous of buckets.get(bucket) ?? []) {
+					if (checked.has(previous.id)) continue;
+					checked.add(previous.id);
+					if (
+						Math.max(segment.start.y, segment.end.y) <
+							Math.min(previous.start.y, previous.end.y) ||
+						Math.min(segment.start.y, segment.end.y) >
+							Math.max(previous.start.y, previous.end.y)
+					) {
+						continue;
+					}
+					const contact = segmentContact(segment, previous);
+					if (
+						contact === undefined ||
+						connectionsAreInternalToSameComponent(
+							connections[routeIndex]!,
+							connections[previous.routeIndex]!
+						) ||
+						connectionsShareNet(
+							connections[routeIndex]!,
+							connections[previous.routeIndex]!
+						)
+					) {
+						continue;
+					}
+					const bridgeable =
+						contact.strict &&
+						!contact.overlap &&
+						segment.orthogonal &&
+						previous.orthogonal &&
+						(segment.start.x === segment.end.x) !==
+							(previous.start.x === previous.end.x);
+					if (!bridgeable) {
+						throw new SchematicSyntaxError(
+							'Separate nets touch or cross without an orthogonal bridge; use ortho, a shared net, or an explicit junction.',
+							connections[routeIndex]!.line
+						);
+					}
+				}
+			}
+		}
+		for (const segment of segments) {
+			const minimumBucket = Math.floor(
+				Math.min(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE
+			);
+			const maximumBucket = Math.floor(
+				Math.max(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE
+			);
+			for (let bucket = minimumBucket; bucket <= maximumBucket; bucket += 1) {
+				const entries = buckets.get(bucket) ?? [];
+				entries.push(segment);
+				buckets.set(bucket, entries);
+			}
+		}
+	}
 }
 
 /**
@@ -1597,6 +1940,37 @@ function segmentCrossing(left: AxisSegment, right: AxisSegment): SchematicPoint 
 	return point;
 }
 
+/** Whether two axis spans touch at an endpoint or overlap collinearly. */
+function axisSegmentsTouch(left: AxisSegment, right: AxisSegment): boolean {
+	if (left.orientation === right.orientation) {
+		if (
+			(left.orientation === 'horizontal' && left.start.y !== right.start.y) ||
+			(left.orientation === 'vertical' && left.start.x !== right.start.x)
+		) {
+			return false;
+		}
+		const coordinate: keyof SchematicPoint = left.orientation === 'horizontal' ? 'x' : 'y';
+		return (
+			Math.max(
+				Math.min(left.start[coordinate], left.end[coordinate]),
+				Math.min(right.start[coordinate], right.end[coordinate])
+			) <=
+			Math.min(
+				Math.max(left.start[coordinate], left.end[coordinate]),
+				Math.max(right.start[coordinate], right.end[coordinate])
+			)
+		);
+	}
+	const horizontal = left.orientation === 'horizontal' ? left : right;
+	const vertical = left.orientation === 'vertical' ? left : right;
+	return (
+		vertical.start.x >= Math.min(horizontal.start.x, horizontal.end.x) &&
+		vertical.start.x <= Math.max(horizontal.start.x, horizontal.end.x) &&
+		horizontal.start.y >= Math.min(vertical.start.y, vertical.end.y) &&
+		horizontal.start.y <= Math.max(vertical.start.y, vertical.end.y)
+	);
+}
+
 /**
  * Replace selected straight spans with semicircular SVG arc bridge commands.
  *
@@ -1606,7 +1980,8 @@ function segmentCrossing(left: AxisSegment, right: AxisSegment): SchematicPoint 
  */
 function bridgedOrthogonalPath(
 	route: RoutedConnection,
-	crossings: ReadonlyMap<number, readonly SchematicPoint[]>
+	crossings: ReadonlyMap<number, readonly SchematicPoint[]>,
+	line: number | undefined
 ): RoutedConnection {
 	if (crossings.size === 0) return route;
 	const first = route.points[0]!;
@@ -1644,7 +2019,12 @@ function bridgedOrthogonalPath(
 			let cursorX = start.x;
 			for (const [crossingIndex, crossing] of segmentCrossings.entries()) {
 				const radius = radii[crossingIndex]!;
-				if (radius < MIN_RENDERABLE_BRIDGE_RADIUS) continue;
+				if (radius < MIN_RENDERABLE_BRIDGE_RADIUS) {
+					throw new SchematicSyntaxError(
+						'Wire crossings are too close to render distinct bridge arcs.',
+						line
+					);
+				}
 				const before = crossing.x - direction * radius;
 				const after = crossing.x + direction * radius;
 				if (before !== cursorX) path += ` H ${formatNumber(before)}`;
@@ -1661,7 +2041,12 @@ function bridgedOrthogonalPath(
 			let cursorY = start.y;
 			for (const [crossingIndex, crossing] of segmentCrossings.entries()) {
 				const radius = radii[crossingIndex]!;
-				if (radius < MIN_RENDERABLE_BRIDGE_RADIUS) continue;
+				if (radius < MIN_RENDERABLE_BRIDGE_RADIUS) {
+					throw new SchematicSyntaxError(
+						'Wire crossings are too close to render distinct bridge arcs.',
+						line
+					);
+				}
 				const before = crossing.y - direction * radius;
 				const after = crossing.y + direction * radius;
 				if (before !== cursorY) path += ` V ${formatNumber(before)}`;
@@ -1686,8 +2071,9 @@ function bridgedOrthogonalPath(
 /**
  * Route connections in source order and bridge only the later trace at a true crossing.
  *
- * A fixed spatial bucket bounds comparisons in typical sparse diagrams. Parallel
- * overlaps, endpoint contacts, Bézier paths, and straight diagonal traces are not bridged.
+ * Fixed spatial buckets bound comparisons in typical sparse diagrams. Parallel
+ * overlap and endpoint contact are rejected across separate nets; Bézier and
+ * diagonal contacts are validated by the universal pass and never receive arcs.
  *
  * @param connections - Validated connections in deterministic source order.
  * @param components - Complete component map.
@@ -1706,6 +2092,7 @@ export function routeConnections(
 	const routes = connections.map((connection) =>
 		routeConnectionInternal(connection, components, bounds, cachedObstacles)
 	);
+	validateUniversalWireContacts(connections, routes);
 	const horizontalBuckets = new Map<number, AxisSegment[]>();
 	const verticalBuckets = new Map<number, AxisSegment[]>();
 	const crossingsByRoute = new Map<number, Map<number, SchematicPoint[]>>();
@@ -1732,10 +2119,28 @@ export function routeConnections(
 		}
 		routeCrossings.set(segmentIndex, points);
 	};
+	const rejectUnbridgeableContact = (routeIndex: number): never => {
+		throw new SchematicSyntaxError(
+			'Separate nets touch or overlap without a bridgeable crossing; use a shared net or an explicit junction.',
+			connections[routeIndex]?.line
+		);
+	};
 	for (let routeIndex = 0; routeIndex < routes.length; routeIndex += 1) {
 		const route = routes[routeIndex]!;
 		for (const segment of axisSegments(route, routeIndex)) {
 			if (segment.orientation === 'horizontal') {
+				for (
+					const previous of horizontalBuckets.get(
+						Math.floor(segment.start.y / CROSSING_BUCKET_SIZE)
+					) ?? []
+				) {
+					if (
+						axisSegmentsTouch(segment, previous) &&
+						!connectionsShareNet(connections[routeIndex]!, connections[previous.routeIndex]!)
+					) {
+						rejectUnbridgeableContact(routeIndex);
+					}
+				}
 				const minBucket = Math.floor(
 					Math.min(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE
 				);
@@ -1745,10 +2150,33 @@ export function routeConnections(
 				for (let bucket = minBucket; bucket <= maxBucket; bucket += 1) {
 					for (const previous of verticalBuckets.get(bucket) ?? []) {
 						const crossing = segmentCrossing(segment, previous);
-						if (crossing !== undefined) recordCrossing(routeIndex, segment.segmentIndex, crossing);
+						const shared = connectionsShareNet(
+							connections[routeIndex]!,
+							connections[previous.routeIndex]!
+						);
+						if (
+							crossing !== undefined &&
+							!shared
+						) {
+							recordCrossing(routeIndex, segment.segmentIndex, crossing);
+						} else if (crossing === undefined && !shared && axisSegmentsTouch(segment, previous)) {
+							rejectUnbridgeableContact(routeIndex);
+						}
 					}
 				}
 			} else {
+				for (
+					const previous of verticalBuckets.get(
+						Math.floor(segment.start.x / CROSSING_BUCKET_SIZE)
+					) ?? []
+				) {
+					if (
+						axisSegmentsTouch(segment, previous) &&
+						!connectionsShareNet(connections[routeIndex]!, connections[previous.routeIndex]!)
+					) {
+						rejectUnbridgeableContact(routeIndex);
+					}
+				}
 				const minBucket = Math.floor(
 					Math.min(segment.start.y, segment.end.y) / CROSSING_BUCKET_SIZE
 				);
@@ -1758,7 +2186,18 @@ export function routeConnections(
 				for (let bucket = minBucket; bucket <= maxBucket; bucket += 1) {
 					for (const previous of horizontalBuckets.get(bucket) ?? []) {
 						const crossing = segmentCrossing(segment, previous);
-						if (crossing !== undefined) recordCrossing(routeIndex, segment.segmentIndex, crossing);
+						const shared = connectionsShareNet(
+							connections[routeIndex]!,
+							connections[previous.routeIndex]!
+						);
+						if (
+							crossing !== undefined &&
+							!shared
+						) {
+							recordCrossing(routeIndex, segment.segmentIndex, crossing);
+						} else if (crossing === undefined && !shared && axisSegmentsTouch(segment, previous)) {
+							rejectUnbridgeableContact(routeIndex);
+						}
 					}
 				}
 			}
@@ -1773,7 +2212,11 @@ export function routeConnections(
 		}
 	}
 	return routes.map((route, index) =>
-		bridgedOrthogonalPath(route, crossingsByRoute.get(index) ?? new Map())
+		bridgedOrthogonalPath(
+			route,
+			crossingsByRoute.get(index) ?? new Map(),
+			connections[index]?.line
+		)
 	);
 }
 
@@ -1974,6 +2417,112 @@ function pointInsideBounds(point: SchematicPoint, bounds: SchematicBounds): bool
 	return point.x >= 0 && point.y >= 0 && point.x <= bounds.width && point.y <= bounds.height;
 }
 
+/** UML frames whose purpose is to contain other diagram nodes. */
+const OVERLAP_CONTAINER_KINDS = new Set<SchematicComponent['kind']>([
+	'package',
+	'component',
+	'node',
+	'device',
+	'system',
+	'partition',
+	'fragment',
+	'interaction',
+	'region'
+]);
+
+function rectangleContains(outer: SchematicRectangle, inner: SchematicRectangle): boolean {
+	return (
+		outer.minX <= inner.minX &&
+		outer.minY <= inner.minY &&
+		outer.maxX >= inner.maxX &&
+		outer.maxY >= inner.maxY
+	);
+}
+
+function rectanglesOverlap(left: SchematicRectangle, right: SchematicRectangle): boolean {
+	return (
+		left.minX < right.maxX &&
+		left.maxX > right.minX &&
+		left.minY < right.maxY &&
+		left.maxY > right.minY
+	);
+}
+
+/** Preserve intentional UML containment while rejecting accidental body collisions. */
+function componentOverlapAllowed(
+	left: { readonly component: SchematicComponent; readonly rectangle: SchematicRectangle },
+	right: { readonly component: SchematicComponent; readonly rectangle: SchematicRectangle }
+): boolean {
+	for (const [container, child] of [
+		[left, right],
+		[right, left]
+	] as const) {
+		if (
+			OVERLAP_CONTAINER_KINDS.has(container.component.kind) &&
+			(rectangleContains(container.rectangle, child.rectangle) ||
+				(['component-port', 'gate'].includes(child.component.kind) &&
+					child.component.x >= container.rectangle.minX &&
+					child.component.x <= container.rectangle.maxX &&
+					child.component.y >= container.rectangle.minY &&
+					child.component.y <= container.rectangle.maxY))
+		) {
+			return true;
+		}
+	}
+	return (
+		(left.component.kind === 'lifeline' &&
+			['activation', 'execution', 'destruction'].includes(right.component.kind)) ||
+		(right.component.kind === 'lifeline' &&
+			['activation', 'execution', 'destruction'].includes(left.component.kind))
+	);
+}
+
+/** Sweep physical component bodies through bounded y-buckets and reject strict overlap. */
+function validateComponentOverlaps(components: readonly SchematicComponent[]): void {
+	const ordered = components
+		.map((component) => ({
+			component,
+			rectangle: componentObstacleRectangle(component, 0)
+		}))
+		.sort(
+			(left, right) =>
+				left.rectangle.minX - right.rectangle.minX ||
+				left.rectangle.minY - right.rectangle.minY ||
+				left.component.line - right.component.line
+		);
+	const buckets: (typeof ordered)[number][][] = [];
+	for (const current of ordered) {
+		const minimumBucket = Math.floor(current.rectangle.minY / CROSSING_BUCKET_SIZE);
+		const maximumBucket = Math.floor(current.rectangle.maxY / CROSSING_BUCKET_SIZE);
+		const candidates = new Set<(typeof ordered)[number]>();
+		for (let bucket = minimumBucket; bucket <= maximumBucket; bucket += 1) {
+			const entries = buckets[bucket];
+			if (entries === undefined) continue;
+			let retained = 0;
+			for (const entry of entries) {
+				if (entry.rectangle.maxX <= current.rectangle.minX) continue;
+				entries[retained++] = entry;
+				candidates.add(entry);
+			}
+			entries.length = retained;
+		}
+		for (const previous of candidates) {
+			if (
+				rectanglesOverlap(previous.rectangle, current.rectangle) &&
+				!componentOverlapAllowed(previous, current)
+			) {
+				throw new SchematicSyntaxError(
+					`${current.component.id} overlaps ${previous.component.id}; move one component or use a UML container.`,
+					current.component.line
+				);
+			}
+		}
+		for (let bucket = minimumBucket; bucket <= maximumBucket; bucket += 1) {
+			(buckets[bucket] ??= []).push(current);
+		}
+	}
+}
+
 /**
  * Validate final generated geometry after terminal distribution and wire routing.
  *
@@ -1989,6 +2538,7 @@ export function validateDocumentGeometry(
 	fence: SchematicFence,
 	routedConnections?: readonly RoutedConnection[]
 ): readonly RoutedConnection[] {
+	validateComponentOverlaps(document.components);
 	for (const component of document.components) {
 		if (!rectangleInsideBounds(componentRectangle(component), fence.bounds)) {
 			throw new SchematicSyntaxError(

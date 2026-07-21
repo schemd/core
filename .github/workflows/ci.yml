@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: bun ci
 
+      - name: Install Chromium for visual goldens
+        run: bunx playwright install --with-deps chromium
+
       - name: Type-check
         run: bun run check
 
@@ -47,6 +50,9 @@ jobs:
           echo '```txt' >> "$GITHUB_STEP_SUMMARY"
           bun run test:coverage | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify Chromium visual goldens
+        run: bun run test:visual
 
   publish:
     name: Publish to npm

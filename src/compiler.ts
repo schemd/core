@@ -28,6 +28,8 @@ export interface SchematicWireSource {
 	readonly target: string;
 	/** One-based source line that declared the connection. */
 	readonly line: number;
+	/** Parser-resolved named or generated topology identity. */
+	readonly netId?: string;
 }
 
 /**
@@ -71,7 +73,8 @@ export function schematicSourceMap(document: SchematicDocument): SchematicSource
 		wires.push({
 			source: `${connection.from.componentId}.${connection.from.port}`,
 			target: `${connection.to.componentId}.${connection.to.port}`,
-			line: connection.line
+			line: connection.line,
+			...(connection.netId === undefined ? {} : { netId: connection.netId })
 		});
 	}
 	return { nodes, wires };

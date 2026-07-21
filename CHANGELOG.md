@@ -2,7 +2,20 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
-## [Unreleased]
+## [Unreleased — 0.3.2]
+
+### Added
+
+- Signal connections now resolve to first-class net topology. Exact shared terminals and junction branches join implicitly, `net=NAME` joins disconnected segments explicitly, unnamed nets receive deterministic `$N` identities, and every net enforces one signal-domain/width contract.
+- Straight, cubic Bézier, and orthogonal routes now share one collision policy across component bodies, transformed endpoint markers, and topology-aware wire contacts. Separate nets may meet only at bridgeable perpendicular orthogonal crossings.
+- Physical-body overlap detection rejects accidental node collisions while preserving edge contact, UML semantic containment, and lifeline activation/execution/destruction overlays. The validator uses an x-ordered, lazily expired y-bucket sweep and includes a 240-body adversarial regression.
+- Chromium visual regression gates now pin net/junction/bridge geometry plus line, Bézier, marker, container, activation, and destruction output in two committed, font-independent goldens.
+
+### Changed
+
+- Full-mode wire groups expose `data-net-id`, and `SchematicWireSource` carries the same parser-resolved identity for host simulations and probes.
+- Same-net crossings remain continuous without bridge arcs. Separate-net collinear overlap, endpoint contact, non-orthogonal crossing, and subpixel bridge clusters now fail with source-line diagnostics instead of producing ambiguous copper or malformed scallops.
+- Mixed-curve wire contact checks use bounded spatial buckets; all-orthogonal documents retain the specialized crossing pass and its bridge ownership order.
 
 ### Fixed
 
@@ -15,8 +28,9 @@ All notable changes to `@schemd/core` are recorded here. Dates describe actual n
 
 ### Verified
 
-- Compiler bundle: 91,062 B minified, 26,435 B gzip — 4,285 B below the 30,720 B gate.
-- Coverage: 100% statements, branches, functions, and lines across 126 tests.
+- Compiler bundle: 99,378 B minified, 29,196 B gzip — 1,524 B below the 30,720 B gate.
+- Coverage: 100% statements, branches, functions, and lines across 137 unit/stress tests, plus 2 Chromium visual goldens.
+- Across three isolated Node.js 26.4.0 / Apple Silicon runs, the median warm run measured 0.213 ms for the representative compile, 5.626 ms at the 512-component ceiling, and 3.783 ms for the dense 16×16 crossing fixture.
 - Runtime dependencies: zero.
 
 ## [0.3.1] - 07/20/2026

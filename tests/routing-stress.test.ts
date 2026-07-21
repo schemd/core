@@ -98,6 +98,15 @@ function edgeMesh(n: number, step: number): string {
 }
 
 describe('routing / bridge stress', () => {
+	test('bounds overlap candidates for hundreds of x-coincident non-overlapping bodies', () => {
+		const source = Array.from(
+			{ length: 240 },
+			(_, index) => `junction:J${index} "j" at (300, ${60 + index * 16}) #slate`
+		).join('\n');
+		const compiled = compileSchematic(source, { ...FENCE, idPrefix: 'overlap-sweep' });
+		expect(compiled.document.components).toHaveLength(240);
+	});
+
 	test('edge meshes bridge every one of n² crossings with only well-formed arcs', () => {
 		for (let n = 2; n <= 8; n += 1) {
 			const compiled = compileSchematic(edgeMesh(n, 300), { ...FENCE, idPrefix: `mesh${n}` });
@@ -144,9 +153,9 @@ describe('routing / bridge stress', () => {
 	});
 
 	test('routes straight parallel wires between components packed inside the clearance margin', () => {
-		// 20-unit pitch < 2x the 12-unit obstacle clearance: each stub necessarily
-		// crosses its neighbor's clearance ring while every body stays untouched.
-		for (const gap of [20, 26]) {
+		// These pitches clear the 36-unit rotated bodies but remain inside the
+		// additional 12-unit routing margin on each side.
+		for (const gap of [40, 46]) {
 			const lines: string[] = [];
 			for (let index = 0; index < 3; index += 1) {
 				lines.push(`port:T${index} "T" at (${300 + index * gap}, 80) #amber [orientation=down]`);

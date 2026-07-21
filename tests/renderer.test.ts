@@ -56,7 +56,7 @@ describe('renderSchematic', () => {
 		);
 		expect(html).toContain('data-component="R1" data-kind="resistor"');
 		expect(html).toContain(
-			'data-wire-source="R1.out" data-wire-target="C1.in" data-source-line="7" tabindex="0"'
+			'data-wire-source="R1.out" data-wire-target="C1.in" data-source-line="7" data-net-id="$1" tabindex="0"'
 		);
 		expect(html).toContain('data-port-id="out" data-parent-node="R1" tabindex="0" role="button"');
 		expect(html).toContain('role="group" aria-labelledby=');
@@ -266,11 +266,11 @@ R2.out -> R3.in #blue [ortho marker-start=dot marker-end=arrow]`,
 nor:G2 "Interlock" at (300, 130) rgba(10, 20, 30, 0.5) [inputs=3 outputs=2 standard=iec]
 or:G3 "Route" at (450, 130) #brand-vector [inputs=2 outputs=1]
 not:G4 "Invert" at (560, 130) #amber [inputs=1 outputs=2]
-qgate:QX "Pauli & X" at (620, 130) hsl(270 80% 60%) [parameter="θ&lt;π" matrix="[[0,1],[1,0]]" phase="π/2"]`,
-			{ bounds: { width: 700, height: 300 }, title: 'Polymorphic gates' }
+qgate:QX "Pauli & X" at (760, 130) hsl(270 80% 60%) [parameter="θ&lt;π" matrix="[[0,1],[1,0]]" phase="π/2"]`,
+			{ bounds: { width: 850, height: 300 }, title: 'Polymorphic gates' }
 		);
 		const html = renderSchematic(document, {
-			bounds: { width: 700, height: 300 },
+			bounds: { width: 850, height: 300 },
 			title: 'Polymorphic gates',
 			mode: 'full'
 		});

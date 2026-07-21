@@ -509,7 +509,7 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 		);
 	});
 
-	test('skips subpixel bridges that would serialize as zero-radius arcs', () => {
+	test('rejects subpixel separate-net contacts that cannot render a bridge', () => {
 		const terminal = (id: string, x: number, y: number): PortComponent => ({
 			kind: 'port', id, label: id, x, y, color: token, line: 1
 		});
@@ -548,29 +548,25 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 			get: (id: string) => components.get(id),
 			values: () => [][Symbol.iterator]()
 		} as unknown as ReadonlyMap<string, SchematicComponent>;
-		const horizontal = routeConnections(
+		expect(() => routeConnections(
 			[
 				connection('T1', 'out', 'B1', 'out'),
 				connection('T2', 'out', 'B2', 'out'),
 				connection('L', 'out', 'R', 'in')
 			],
 			endpointOnlyMap
-		);
-		expect(horizontal[2]!.d).not.toContain(' A 0 0 ');
-		expect(horizontal[2]!.d).not.toContain(' A ');
-		const vertical = routeConnections(
+		)).toThrow(/Separate nets touch|Wire crossings are too close/);
+		expect(() => routeConnections(
 			[
 				connection('L1', 'out', 'R1', 'in'),
 				connection('L2', 'out', 'R2', 'in'),
 				connection('T', 'out', 'B', 'out')
 			],
 			endpointOnlyMap
-		);
-		expect(vertical[2]!.d).not.toContain(' A 0 0 ');
-		expect(vertical[2]!.d).not.toContain(' A ');
+		)).toThrow(/Separate nets touch|Wire crossings are too close/);
 	});
 
-	test('never applies crossing arcs to line or bezier routes', () => {
+	test('rejects non-orthogonal separate-net crossings and permits shared-net crossings', () => {
 		const left: PortComponent = { kind: 'port', id: 'L', label: 'L', x: 50, y: 120, color: token, line: 1 };
 		const right: PortComponent = { ...left, id: 'R', x: 450 };
 		const top: PortComponent = { ...left, id: 'T', x: 250, y: 20 };
@@ -585,13 +581,166 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 			markerEnd: 'none',
 			line: 2
 		};
-		const routed = routeConnections([
-			base,
-			{ ...base, from: { componentId: 'T', port: 'out' }, to: { componentId: 'B', port: 'out' }, curve: 'bezier' }
-		], components);
+		const bezier = {
+			...base,
+			from: { componentId: 'T', port: 'out' },
+			to: { componentId: 'B', port: 'out' },
+			curve: 'bezier' as const
+		};
+		expect(() => routeConnections([base, bezier], components)).toThrow(
+			/Separate nets touch or cross/
+		);
+		const routed = routeConnections(
+			[
+				{ ...base, net: 'SHARED' },
+				{ ...bezier, net: 'SHARED' }
+			],
+			components
+		);
 		expect(routed[1]!.curve).toBe('bezier');
 		expect(routed[1]!.d).toContain(' C ');
 		expect(routed[1]!.d).not.toContain(' A ');
+	});
+
+	test('rejects collinear and endpoint contacts across separate low-level nets', () => {
+		const terminal = (
+			id: string,
+			x: number,
+			y: number,
+			orientation: PortComponent['orientation'] = 'right'
+		): PortComponent => ({ kind: 'port', id, label: id, x, y, orientation, color: token, line: 1 });
+		const components = new Map<string, SchematicComponent>();
+		for (const component of [
+			terminal('L1', 0, 100),
+			terminal('R1', 500, 100),
+			terminal('L2', 100, 100),
+			terminal('R2', 600, 100),
+			terminal('L3', 0, 180),
+			terminal('R3', 500, 180),
+			terminal('T1', 300, 0, 'down'),
+			terminal('B1', 300, 300, 'up'),
+			terminal('T2', 300, 80, 'down'),
+			terminal('B2', 300, 380, 'up'),
+			terminal('TE', 458, 58, 'down'),
+			terminal('BE', 458, 300, 'up'),
+			terminal('DLA', 0, 0),
+			terminal('DLB', 500, 200),
+			terminal('DLC', 0, 20),
+			terminal('DLD', 500, 220),
+			terminal('L4', 0, 500),
+			terminal('R4', 500, 500),
+			{ kind: 'cnot', id: 'VT', label: 'VT', x: 250, y: 20, color: token, line: 1 },
+			{ kind: 'cnot', id: 'VB', label: 'VB', x: 250, y: 220, color: token, line: 1 }
+		] satisfies readonly SchematicComponent[]) {
+			components.set(component.id, component);
+		}
+		const connection = (
+			from: string,
+			to: string,
+			curve: SchematicConnection['curve'] = 'line'
+		): SchematicConnection => ({
+			from: { componentId: from, port: 'out' },
+			to: { componentId: to, port: 'in' },
+			color: token,
+			curve,
+			markerStart: 'none',
+			markerEnd: 'none',
+			line: 30
+		});
+		const endpointOnlyMap = {
+			get: (id: string) => components.get(id),
+			values: () => [][Symbol.iterator]()
+		} as unknown as ReadonlyMap<string, SchematicComponent>;
+		expect(() =>
+			routeConnections([connection('L1', 'R1'), connection('L2', 'R2')], endpointOnlyMap)
+		).toThrow(/Separate nets touch/);
+		expect(() =>
+			routeConnections([connection('L1', 'R1'), connection('L3', 'R3')], endpointOnlyMap)
+		).not.toThrow();
+		expect(() =>
+			routeConnections([connection('T1', 'B1'), connection('T2', 'B2')], endpointOnlyMap)
+		).toThrow(/Separate nets touch/);
+		expect(() =>
+			routeConnections(
+				[connection('T1', 'B1', 'ortho'), connection('T2', 'B2', 'ortho')],
+				endpointOnlyMap
+			)
+		).toThrow(/Separate nets touch/);
+		expect(() =>
+			routeConnections(
+				[connection('L1', 'R1', 'ortho'), connection('TE', 'BE', 'ortho')],
+				endpointOnlyMap
+			)
+		).toThrow(/Separate nets touch|Separate nets touch or overlap/);
+		expect(() =>
+			routeConnections(
+				[connection('TE', 'BE', 'ortho'), connection('L1', 'R1', 'ortho')],
+				endpointOnlyMap
+			)
+		).toThrow(/Separate nets touch|Separate nets touch or overlap/);
+		expect(() =>
+			routeConnections([connection('DLA', 'DLB'), connection('DLC', 'DLD')], endpointOnlyMap)
+		).not.toThrow();
+		const mixed = routeConnections(
+			[
+				connection('L1', 'R1', 'ortho'),
+				{
+					...connection('VT', 'VB', 'ortho'),
+					from: { componentId: 'VT', port: 'target' },
+					to: { componentId: 'VB', port: 'control' }
+				},
+				connection('L4', 'R4')
+			],
+			endpointOnlyMap
+		);
+		expect(mixed[1]!.d).toContain(' A ');
+	});
+
+	test('rejects an unrenderable horizontal cluster of otherwise bridgeable crossings', () => {
+		const horizontalLeft: PortComponent = {
+			kind: 'port', id: 'HL', label: 'HL', x: 0, y: 120, color: token, line: 1
+		};
+		const horizontalRight: PortComponent = { ...horizontalLeft, id: 'HR', x: 600 };
+		const vertical = (id: string, x: number, y: number): SchematicComponent => ({
+			kind: 'cnot', id, label: id, x, y, color: token, line: 1
+		});
+		const topA = vertical('TA', 300, 20);
+		const bottomA = vertical('BA', 300, 220);
+		const topB = vertical('TB', 300.0004, 20);
+		const bottomB = vertical('BB', 300.0004, 220);
+		const components = new Map(
+			[horizontalLeft, horizontalRight, topA, bottomA, topB, bottomB].map(
+				(component) => [component.id, component] as const
+			)
+		);
+		const endpointOnlyMap = {
+			get: (id: string) => components.get(id),
+			values: () => [][Symbol.iterator]()
+		} as unknown as ReadonlyMap<string, SchematicComponent>;
+		const connection = (
+			from: string,
+			fromPort: string,
+			to: string,
+			toPort: string
+		): SchematicConnection => ({
+			from: { componentId: from, port: fromPort },
+			to: { componentId: to, port: toPort },
+			color: token,
+			curve: 'ortho',
+			markerStart: 'none',
+			markerEnd: 'none',
+			line: 31
+		});
+		expect(() =>
+			routeConnections(
+				[
+					connection('TA', 'target', 'BA', 'control'),
+					connection('TB', 'target', 'BB', 'control'),
+					connection('HL', 'out', 'HR', 'in')
+				],
+				endpointOnlyMap
+			)
+		).toThrow(/Wire crossings are too close/);
 	});
 
 	test('fails deterministically when a bounded obstacle wall has no route', () => {
@@ -765,6 +914,34 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 			{ bounds: { width: 300, height: 220 }, title: 'Mismatch' },
 			[]
 		)).toThrow('Routed connection count does not match');
+	});
+
+	test('allows sequence activation overlap regardless of sweep ordering', () => {
+		const activation: SchematicComponent = {
+			kind: 'activation',
+			id: 'ACTIVE',
+			label: 'active',
+			x: 240,
+			y: 250,
+			color: token,
+			line: 1,
+			bodyWidth: 60,
+			bodyHeight: 100
+		};
+		const lifeline: SchematicComponent = {
+			kind: 'lifeline',
+			id: 'LIFE',
+			label: 'life',
+			x: 280,
+			y: 250,
+			color: token,
+			line: 2,
+			bodyWidth: 40,
+			bodyHeight: 300
+		};
+		expect(() =>
+			validateDocumentGeometry({ components: [activation, lifeline], connections: [] }, fence)
+		).not.toThrow();
 	});
 
 	test('does not bridge perpendicular segments whose finite ranges do not meet', () => {

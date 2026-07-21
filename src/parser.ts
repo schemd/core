@@ -97,6 +97,8 @@ const ANGLE_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:deg|grad|rad|turn)?$/i;
 const ALIAS_PATTERN = /^[a-z][a-z0-9-]{0,63}$/i;
 /** Addressable IC pin identifier syntax. */
 const PIN_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+/** Explicit electrical/digital/quantum net identifier syntax. */
+const NET_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 /** Port aliases reserved for deterministic first-input/first-output resolution. */
 const RESERVED_IC_PIN_NAMES = new Set(['in', 'out']);
 /** Maximum pin declarations accepted on any one IC edge. */
@@ -1089,6 +1091,8 @@ interface ParsedConnectionOptions {
 	dashed: boolean;
 	/** Optional non-default signal domain. */
 	signalKind: SchematicSignalKind | undefined;
+	/** Optional explicit topology name. */
+	net: string | undefined;
 	/** Optional explicit scalar/bus width. */
 	width: number | undefined;
 }
@@ -1146,9 +1150,10 @@ function parseConnectionOptions(raw: string | undefined, line: number): ParsedCo
 	let label: string | undefined;
 	let dashed = false;
 	let signalKind: SchematicSignalKind | undefined;
+	let net: string | undefined;
 	let width: number | undefined;
 	if (raw === undefined || raw.trim() === '') {
-		return { curve, markerStart, markerEnd, relation, label, dashed, signalKind, width };
+		return { curve, markerStart, markerEnd, relation, label, dashed, signalKind, net, width };
 	}
 
 	const seen = new Set<string>();
@@ -1193,10 +1198,10 @@ function parseConnectionOptions(raw: string | undefined, line: number): ParsedCo
 			seen.add('marker-end');
 			continue;
 		}
-		const match = token.match(/^(marker-start|marker-end|relation|label|signal|width)=(.*)$/);
+		const match = token.match(/^(marker-start|marker-end|relation|label|signal|net|width)=(.*)$/);
 		if (!match) {
 			throw new SchematicSyntaxError(
-				'Unsupported connection routing, marker, relation, label, or stroke option.',
+				'Unsupported connection routing, topology, marker, relation, label, or stroke option.',
 				line
 			);
 		}
@@ -1232,6 +1237,14 @@ function parseConnectionOptions(raw: string | undefined, line: number): ParsedCo
 				);
 			}
 			signalKind = optionValue;
+		} else if (option === 'net') {
+			if (!NET_NAME_PATTERN.test(optionValue)) {
+				throw new SchematicSyntaxError(
+					'net must begin with a letter and contain at most 64 letters, digits, underscores, or hyphens.',
+					line
+				);
+			}
+			net = optionValue;
 		} else if (option === 'width') {
 			width = parseWidth(optionValue, 1, line);
 		} else {
@@ -1267,7 +1280,7 @@ function parseConnectionOptions(raw: string | undefined, line: number): ParsedCo
 	if (label === undefined && (relation === 'include' || relation === 'extend')) {
 		label = `«${relation}»`;
 	}
-	return { curve, markerStart, markerEnd, relation, label, dashed, signalKind, width };
+	return { curve, markerStart, markerEnd, relation, label, dashed, signalKind, net, width };
 }
 
 /**
@@ -1293,6 +1306,7 @@ function parseConnection(match: RegExpMatchArray, line: number): SchematicConnec
 	};
 	if (options.label !== undefined) connection.label = options.label;
 	if (options.signalKind !== undefined) connection.signalKind = options.signalKind;
+	if (options.net !== undefined) connection.net = options.net;
 	if (options.width !== undefined) connection.width = options.width;
 	return connection;
 }
@@ -1588,6 +1602,96 @@ function validateConnectionWidth(
 }
 
 /**
+ * Resolve explicit names and shared terminals into deterministic signal nets.
+ *
+ * A disjoint segment may join a named net with `net=NAME`; connections sharing
+ * an exact component port join implicitly. UML relations remain connectors, not
+ * electrical topology, and therefore never receive a net identity.
+ */
+function assignConnectionNetIds(connections: SchematicConnection[]): void {
+	const parent = connections.map((_, index) => index);
+	const find = (index: number): number => {
+		let root = index;
+		while (parent[root] !== root) root = parent[root]!;
+		while (parent[index] !== index) {
+			const next = parent[index]!;
+			parent[index] = root;
+			index = next;
+		}
+		return root;
+	};
+	const union = (left: number, right: number): void => {
+		const leftRoot = find(left);
+		const rightRoot = find(right);
+		if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+	};
+	const terminalOwner = new Map<string, number>();
+	const namedOwner = new Map<string, number>();
+	for (const [index, connection] of connections.entries()) {
+		if (connection.relation !== 'signal') {
+			if (connection.net !== undefined) {
+				throw new SchematicSyntaxError('Only signal connections may declare a net.', connection.line);
+			}
+			continue;
+		}
+		for (const endpoint of [connection.from, connection.to]) {
+			const key = `${endpoint.componentId}.${endpoint.port}`;
+			const owner = terminalOwner.get(key);
+			if (owner === undefined) terminalOwner.set(key, index);
+			else union(index, owner);
+		}
+		if (connection.net !== undefined) {
+			const owner = namedOwner.get(connection.net);
+			if (owner === undefined) namedOwner.set(connection.net, index);
+			else union(index, owner);
+		}
+	}
+
+	const names = new Map<number, string>();
+	const contracts = new Map<number, { signalKind: SchematicSignalKind; width: number }>();
+	for (const [index, connection] of connections.entries()) {
+		if (connection.relation !== 'signal') continue;
+		const root = find(index);
+		if (connection.net !== undefined) {
+			const existing = names.get(root);
+			if (existing !== undefined && existing !== connection.net) {
+				throw new SchematicSyntaxError(
+					`Terminal joins conflicting nets ${existing} and ${connection.net}.`,
+					connection.line
+				);
+			}
+			names.set(root, connection.net);
+		}
+		const signalKind = connection.signalKind ?? 'electrical';
+		const width = connection.width ?? 1;
+		const contract = contracts.get(root);
+		if (
+			contract !== undefined &&
+			(contract.signalKind !== signalKind || contract.width !== width)
+		) {
+			throw new SchematicSyntaxError(
+				`Net segments must share one signal kind and width; expected ${contract.signalKind} width ${contract.width}.`,
+				connection.line
+			);
+		}
+		contracts.set(root, { signalKind, width });
+	}
+
+	const resolved = new Map<number, string>();
+	let generated = 0;
+	for (const [index, connection] of connections.entries()) {
+		if (connection.relation !== 'signal') continue;
+		const root = find(index);
+		let netId = resolved.get(root);
+		if (netId === undefined) {
+			netId = names.get(root) ?? `$${++generated}`;
+			resolved.set(root, netId);
+		}
+		connection.netId = netId;
+	}
+}
+
+/**
  * Snapshot and validate the public parser's runtime fence boundary.
  *
  * TypeScript declarations do not protect JavaScript consumers, and retaining a
@@ -1726,6 +1830,7 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 		validateEndpoint(connection.to, componentsById, connection.line);
 		validateConnectionWidth(connection, componentsById);
 	}
+	assignConnectionNetIds(connections);
 	const document = { components, connections } satisfies SchematicDocument;
 	const routes = validateDocumentGeometry(document, normalizedFence);
 	const parsedDocument = freezeParsedDocument(document);

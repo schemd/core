@@ -619,6 +619,10 @@ export interface SchematicConnection {
 	relation?: SchematicRelationKind;
 	/** Non-default signal domain; absence preserves legacy electrical behavior. */
 	signalKind?: SchematicSignalKind;
+	/** Author-supplied net name joining otherwise disconnected signal segments. */
+	net?: string;
+	/** Parser-resolved topology identity; unnamed nets use a stable `$N` identifier. */
+	netId?: string;
 	/** Validated bus/register width; absence denotes a scalar connection. */
 	width?: number;
 	/** Optional text centered beside the routed connector. */

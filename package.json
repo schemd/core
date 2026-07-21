@@ -1,6 +1,6 @@
 {
   "name": "@schemd/core",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Zero-dependency text-to-SVG compiler for schematics and UML.",
   "homepage": "https://schemd.johnowolabiidogun.dev",
   "bugs": {
@@ -60,11 +60,15 @@
     "benchmark": "bun run build && node scripts/benchmark.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "prepack": "bun run build",
+    "release:check": "bun run check && bun run test:coverage && bun run test:visual && bun run build && bun run size && node scripts/benchmark.mjs",
     "size": "node scripts/check-bundle-size.mjs",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:visual": "playwright test --config=playwright.config.ts",
+    "test:visual:install": "playwright install chromium"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@vitest/coverage-v8": "^4.1.10",
     "typescript": "^6.0.3",
     "vite": "^8.1.4",

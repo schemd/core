@@ -13,6 +13,11 @@ import {
 	componentTextAnchors,
 	distributedCoordinate,
 	enumerateComponentPorts,
+	formatNumber as svgNumber,
+	isClassicalGate,
+	isDigitalComponent,
+	isQuantumSpecial,
+	isUmlComponent,
 	PORT_HOTSPOT_RADIUS,
 	quantumGateDimensions,
 	quantumTrackCoordinate,
@@ -26,13 +31,9 @@ import { MAX_SCHEMATIC_SVG_OUTPUT_BYTES, utf8ByteLength } from './limits.js';
 import { assertParsedSchematicDocument } from './parser.js';
 import { parsedSchematicRoutes } from './route-cache.js';
 import {
-	CLASSICAL_GATE_KINDS,
-	DIGITAL_COMPONENT_KINDS,
 	QUANTUM_GATE_KINDS,
-	QUANTUM_SPECIAL_KINDS,
 	SCHEMD_OUTPUT_MODES,
 	SCHEMD_SEMANTIC_HOOKS,
-	UML_COMPONENT_KINDS,
 	SchematicSyntaxError,
 	type ClassicalGateComponent,
 	type CompileSchematicOptions,
@@ -216,16 +217,6 @@ function normalizeCompileOptions(value: unknown): NormalizedCompileOptions {
 }
 
 /**
- * Serialize a computed SVG number with at most three fractional digits.
- *
- * @param value - Finite layout coordinate.
- * @returns Compact decimal string.
- */
-function svgNumber(value: number): string {
-	return String(Number(value.toFixed(3)));
-}
-
-/**
  * Estimate a bounded SVG `textLength` using Unicode code points.
  *
  * @param value - Text being fitted.
@@ -254,26 +245,7 @@ function stableHash(value: string): string {
 	return (hash >>> 0).toString(36);
 }
 
-/**
- * Narrow a component union to a classical gate.
- *
- * @param component - Component to classify.
- * @returns Whether its kind belongs to the classical gate registry.
- */
-function isClassicalGate(component: SchematicComponent): component is ClassicalGateComponent {
-	return CLASSICAL_GATE_KINDS.includes(component.kind as ClassicalGateComponent['kind']);
-}
-
-function isDigitalComponent(component: SchematicComponent): component is DigitalComponent {
-	return DIGITAL_COMPONENT_KINDS.includes(component.kind as DigitalComponent['kind']);
-}
-
-function isQuantumSpecial(
-	component: SchematicComponent
-): component is QuantumSpecialComponent {
-	return QUANTUM_SPECIAL_KINDS.includes(component.kind as QuantumSpecialComponent['kind']);
-}
-
+/** Narrow a component union to a quantum gate (renderer-only classification). */
 function isQuantumGate(component: SchematicComponent): component is QuantumGateComponent {
 	return QUANTUM_GATE_KINDS.includes(component.kind as QuantumGateComponent['kind']);
 }
@@ -291,11 +263,6 @@ function componentRotation(component: SchematicComponent): number {
 		default:
 			return 0;
 	}
-}
-
-/** Narrow a component to the UML renderer union. */
-function isUmlComponent(component: SchematicComponent): component is UmlComponent {
-	return UML_COMPONENT_KINDS.includes(component.kind as UmlComponent['kind']);
 }
 
 /**
@@ -1072,7 +1039,7 @@ function connectionMarkup(
 	const traceId = `${idPrefix}-wire-${index}-vector`;
 	const signalKind = connection.signalKind ?? 'electrical';
 	const signalClass = connection.signalKind === undefined ? '' : ` schematic-signal--${signalKind}`;
-	const dataAttributes = ` data-wire-source="${source}" data-wire-target="${target}" data-source-line="${connection.line}"${connection.signalKind === undefined ? '' : ` data-signal-kind="${signalKind}"`}${connection.width === undefined ? '' : ` data-bus-width="${connection.width}"`}`;
+	const dataAttributes = ` data-wire-source="${source}" data-wire-target="${target}" data-source-line="${connection.line}"${connection.netId === undefined ? '' : ` data-net-id="${escapeXml(connection.netId)}"`}${connection.signalKind === undefined ? '' : ` data-signal-kind="${signalKind}"`}${connection.width === undefined ? '' : ` data-bus-width="${connection.width}"`}`;
 	/* v8 ignore next -- parsed documents always materialize relation; fallback preserves old typed ASTs. */
 	const relation = connection.relation ?? 'signal';
 	const accessibility = ` tabindex="0" role="group" aria-label="${escapeXml(relation)} from ${source} to ${target}"`;

@@ -25,6 +25,8 @@ All listed directional families default to `orientation=right`. Indexed ports ar
 | `load` | `lamp`, `motor`, `speaker`, `buzzer` | `in`, `out` |
 | `ic` | `left`, `right`, `top`, `bottom` pin lists | each declared pin name |
 
+Every signal segment attached to the same `junction.node` belongs to one inferred net. `net=NAME` on any attached segment names the complete topology; conflicting names, signal domains, or widths are rejected.
+
 ## Digital
 
 Classical gates are `and`, `or`, `not`, `nand`, `nor`, `xor`, and `xnor`. They accept `inputs=1..32`, `outputs=1..32`, and `standard=ieee|iec`; ports are `in1..inN` and `out1..outN`.
