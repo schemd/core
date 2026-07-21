@@ -93,6 +93,11 @@ interface NormalizedCompileOptions extends CompileSchematicOptions {
 	semanticHookMask: number;
 }
 
+/** Shared static text paint: solid glyphs that never inherit the vector stroke. */
+const TEXT_PAINT = 'fill="currentColor" stroke="none"';
+/** Shared `textLength` fitting policy for width-clamped labels. */
+const LENGTH_FIT = 'lengthAdjust="spacingAndGlyphs"';
+
 const NODE_HOOK = 1;
 const PORT_HOOK = 2;
 const WIRE_HOOK = 4;
@@ -415,7 +420,7 @@ function iecGate(component: ClassicalGateComponent, paint: string): string {
 		xnor: '=1',
 		not: '1'
 	};
-	return `<rect ${paint} x="-32" y="${-height / 2}" width="64" height="${height}" rx="2" /><text class="schematic-gate-symbol" fill="currentColor" stroke="none" x="0" y="4" text-anchor="middle" font-size="14">${symbol[component.kind]}</text>${inversionBubbles(component, paint)}${gateStubs(component, paint)}`;
+	return `<rect ${paint} x="-32" y="${-height / 2}" width="64" height="${height}" rx="2" /><text class="schematic-gate-symbol" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="14">${symbol[component.kind]}</text>${inversionBubbles(component, paint)}${gateStubs(component, paint)}`;
 }
 
 /**
@@ -463,7 +468,7 @@ function quantumText(component: QuantumGateComponent): string {
 	return rows
 		.map(
 			(value, index) =>
-					`<text class="${index === 0 ? 'schematic-gate-symbol' : 'schematic-quantum-detail'}" fill="currentColor" stroke="none" x="0" y="${start + index * 15}" text-anchor="middle" font-size="${index === 0 ? 14 : 10}" textLength="${fittedTextLength(value, bodyWidth - 12, index === 0 ? 7 : 5)}" lengthAdjust="spacingAndGlyphs">${renderMathLabelTspans(value)}</text>`
+					`<text class="${index === 0 ? 'schematic-gate-symbol' : 'schematic-quantum-detail'}" ${TEXT_PAINT} x="0" y="${start + index * 15}" text-anchor="middle" font-size="${index === 0 ? 14 : 10}" textLength="${fittedTextLength(value, bodyWidth - 12, index === 0 ? 7 : 5)}" ${LENGTH_FIT}>${renderMathLabelTspans(value)}</text>`
 		)
 		.join('');
 }
@@ -605,17 +610,17 @@ function icPinMarkup(
 				4
 			);
 			if (side === 'left') {
-				return `<path ${paint} d="M ${x} ${y} H ${-component.bodyWidth / 2}" /><text class="schematic-pin-label" fill="currentColor" stroke="none" x="${-component.bodyWidth / 2 + 5}" y="${y + 3}" text-anchor="start" font-size="10" textLength="${horizontalTextLength}" lengthAdjust="spacingAndGlyphs">${escapeXml(pin)}</text>`;
+				return `<path ${paint} d="M ${x} ${y} H ${-component.bodyWidth / 2}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${-component.bodyWidth / 2 + 5}" y="${y + 3}" text-anchor="start" font-size="10" textLength="${horizontalTextLength}" ${LENGTH_FIT}>${escapeXml(pin)}</text>`;
 			}
 			if (side === 'right') {
-				return `<path ${paint} d="M ${component.bodyWidth / 2} ${y} H ${x}" /><text class="schematic-pin-label" fill="currentColor" stroke="none" x="${component.bodyWidth / 2 - 5}" y="${y + 3}" text-anchor="end" font-size="10" textLength="${horizontalTextLength}" lengthAdjust="spacingAndGlyphs">${escapeXml(pin)}</text>`;
+				return `<path ${paint} d="M ${component.bodyWidth / 2} ${y} H ${x}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${component.bodyWidth / 2 - 5}" y="${y + 3}" text-anchor="end" font-size="10" textLength="${horizontalTextLength}" ${LENGTH_FIT}>${escapeXml(pin)}</text>`;
 			}
 			if (side === 'top') {
 				const labelY = -component.bodyHeight / 2 + 5;
-				return `<path ${paint} d="M ${x} ${y} V ${-component.bodyHeight / 2}" /><text class="schematic-pin-label" fill="currentColor" stroke="none" x="${x}" y="${labelY}" text-anchor="start" font-size="10" textLength="${verticalTextLength}" lengthAdjust="spacingAndGlyphs" transform="rotate(90 ${x} ${labelY})">${escapeXml(pin)}</text>`;
+				return `<path ${paint} d="M ${x} ${y} V ${-component.bodyHeight / 2}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${x}" y="${labelY}" text-anchor="start" font-size="10" textLength="${verticalTextLength}" ${LENGTH_FIT} transform="rotate(90 ${x} ${labelY})">${escapeXml(pin)}</text>`;
 			}
 			const labelY = component.bodyHeight / 2 - 5;
-			return `<path ${paint} d="M ${x} ${component.bodyHeight / 2} V ${y}" /><text class="schematic-pin-label" fill="currentColor" stroke="none" x="${x}" y="${labelY}" text-anchor="start" font-size="10" textLength="${verticalTextLength}" lengthAdjust="spacingAndGlyphs" transform="rotate(-90 ${x} ${labelY})">${escapeXml(pin)}</text>`;
+			return `<path ${paint} d="M ${x} ${component.bodyHeight / 2} V ${y}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${x}" y="${labelY}" text-anchor="start" font-size="10" textLength="${verticalTextLength}" ${LENGTH_FIT} transform="rotate(-90 ${x} ${labelY})">${escapeXml(pin)}</text>`;
 		})
 		.join('');
 }
@@ -631,13 +636,13 @@ function integratedCircuitShape(component: IntegratedCircuitComponent, paint: st
 	const left = -component.bodyWidth / 2;
 	const top = -component.bodyHeight / 2;
 	const rotation = componentRotation(component);
-	const label = `<text class="schematic-gate-symbol" fill="currentColor" stroke="none" x="0" y="4" text-anchor="middle" font-size="12" textLength="${fittedTextLength(component.label, component.bodyWidth - 12, 7)}" lengthAdjust="spacingAndGlyphs">${renderMathLabelTspans(component.label)}</text>`;
+	const label = `<text class="schematic-gate-symbol" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="12" textLength="${fittedTextLength(component.label, component.bodyWidth - 12, 7)}" ${LENGTH_FIT}>${renderMathLabelTspans(component.label)}</text>`;
 	return `<rect ${paint} x="${left}" y="${top}" width="${component.bodyWidth}" height="${component.bodyHeight}" rx="3" />${icPinMarkup(component, 'left', paint)}${icPinMarkup(component, 'right', paint)}${icPinMarkup(component, 'top', paint)}${icPinMarkup(component, 'bottom', paint)}${rotation === 0 ? label : `<g transform="rotate(${-rotation})">${label}</g>`}`;
 }
 
 /** Serialize one left-aligned UML compartment row. */
 function umlRow(value: string, x: number, y: number): string {
-	return `<text class="schematic-uml-text schematic-uml-row" fill="currentColor" stroke="none" x="${svgNumber(x)}" y="${svgNumber(y)}" font-size="12">${renderMathLabelTspans(value)}</text>`;
+	return `<text class="schematic-uml-text schematic-uml-row" ${TEXT_PAINT} x="${svgNumber(x)}" y="${svgNumber(y)}" font-size="12">${renderMathLabelTspans(value)}</text>`;
 }
 
 /** Render a dynamically sized three-compartment UML class. */
@@ -651,7 +656,7 @@ function umlClassShape(component: UmlClassComponent, paint: string): string {
 	const stereotype =
 		component.stereotype === undefined
 			? ''
-			: `<text class="schematic-uml-text schematic-uml-stereotype" fill="currentColor" stroke="none" x="0" y="${svgNumber(top + 13)}" text-anchor="middle" font-size="11">«${renderMathLabelTspans(component.stereotype)}»</text>`;
+			: `<text class="schematic-uml-text schematic-uml-stereotype" ${TEXT_PAINT} x="0" y="${svgNumber(top + 13)}" text-anchor="middle" font-size="11">«${renderMathLabelTspans(component.stereotype)}»</text>`;
 	const nameY = top + (component.stereotype === undefined ? 23 : 32);
 	const attributes = component.attributes
 		.map((row, index) => umlRow(row, left + 8, attributeSeparator + 17 + index * 16))
@@ -659,7 +664,7 @@ function umlClassShape(component: UmlClassComponent, paint: string): string {
 	const operations = component.operations
 		.map((row, index) => umlRow(row, left + 8, operationSeparator + 17 + index * 16))
 		.join('');
-	return `<rect ${paint} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" rx="2" /><path ${paint} d="M ${svgNumber(left)} ${svgNumber(attributeSeparator)} H ${svgNumber(-left)} M ${svgNumber(left)} ${svgNumber(operationSeparator)} H ${svgNumber(-left)}" />${stereotype}<text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="${svgNumber(nameY)}" text-anchor="middle" font-size="13" font-weight="600">${renderMathLabelTspans(component.label)}</text>${attributes}${operations}`;
+	return `<rect ${paint} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" rx="2" /><path ${paint} d="M ${svgNumber(left)} ${svgNumber(attributeSeparator)} H ${svgNumber(-left)} M ${svgNumber(left)} ${svgNumber(operationSeparator)} H ${svgNumber(-left)}" />${stereotype}<text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="${svgNumber(nameY)}" text-anchor="middle" font-size="13" font-weight="600">${renderMathLabelTspans(component.label)}</text>${attributes}${operations}`;
 }
 
 /** Render a UML state and its optional behavior compartment. */
@@ -670,7 +675,7 @@ function umlStateShape(component: UmlStateComponent, paint: string): string {
 	const rows = component.details
 		.map((row, index) => umlRow(row, left + 8, separator + 17 + index * 16))
 		.join('');
-	return `<rect ${paint} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" rx="10" />${component.details.length === 0 ? '' : `<path ${paint} d="M ${svgNumber(left)} ${svgNumber(separator)} H ${svgNumber(-left)}" />`}<text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="${svgNumber(top + 21)}" text-anchor="middle" font-size="13" font-weight="600">${renderMathLabelTspans(component.label)}</text>${rows}`;
+	return `<rect ${paint} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" rx="10" />${component.details.length === 0 ? '' : `<path ${paint} d="M ${svgNumber(left)} ${svgNumber(separator)} H ${svgNumber(-left)}" />`}<text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="${svgNumber(top + 21)}" text-anchor="middle" font-size="13" font-weight="600">${renderMathLabelTspans(component.label)}</text>${rows}`;
 }
 
 /** Render any first-class UML component in local coordinates. */
@@ -682,24 +687,24 @@ function umlComponentShape(component: UmlComponent, paint: string, nodePaint: st
 	if (component.kind === 'state') return umlStateShape(component, paint);
 	switch (component.kind) {
 		case 'actor':
-			return `<circle ${paint} cx="0" cy="-28" r="9" /><path ${paint} d="M 0 -19 V 12 M -20 -5 H 20 M 0 12 L -17 37 M 0 12 L 17 37" /><text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="49" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text>`;
+			return `<circle ${paint} cx="0" cy="-28" r="9" /><path ${paint} d="M 0 -19 V 12 M -20 -5 H 20 M 0 12 L -17 37 M 0 12 L 17 37" /><text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="49" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text>`;
 		case 'usecase':
-			return `<ellipse ${paint} cx="0" cy="0" rx="${svgNumber(component.bodyWidth / 2)}" ry="${svgNumber(component.bodyHeight / 2)}" /><text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="4" text-anchor="middle" font-size="13">${renderMathLabelTspans(component.label)}</text>`;
+			return `<ellipse ${paint} cx="0" cy="0" rx="${svgNumber(component.bodyWidth / 2)}" ry="${svgNumber(component.bodyHeight / 2)}" /><text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="13">${renderMathLabelTspans(component.label)}</text>`;
 		case 'lifeline': {
 			const top = -component.bodyHeight / 2;
 			const left = -component.bodyWidth / 2;
-			return `<rect ${paint} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="32" rx="2" /><text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="${svgNumber(top + 21)}" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text><path ${paint} stroke-dasharray="6 5" d="M 0 ${svgNumber(top + 32)} V ${svgNumber(component.bodyHeight / 2)}" />`;
+			return `<rect ${paint} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="32" rx="2" /><text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="${svgNumber(top + 21)}" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text><path ${paint} stroke-dasharray="6 5" d="M 0 ${svgNumber(top + 32)} V ${svgNumber(component.bodyHeight / 2)}" />`;
 		}
 		case 'note': {
 			const left = -component.bodyWidth / 2;
 			const top = -component.bodyHeight / 2;
 			const right = component.bodyWidth / 2;
-			return `<path ${paint} d="M ${svgNumber(left)} ${svgNumber(top)} H ${svgNumber(right - 14)} L ${svgNumber(right)} ${svgNumber(top + 14)} V ${svgNumber(-top)} H ${svgNumber(left)} Z M ${svgNumber(right - 14)} ${svgNumber(top)} V ${svgNumber(top + 14)} H ${svgNumber(right)}" /><text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="4" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text>`;
+			return `<path ${paint} d="M ${svgNumber(left)} ${svgNumber(top)} H ${svgNumber(right - 14)} L ${svgNumber(right)} ${svgNumber(top + 14)} V ${svgNumber(-top)} H ${svgNumber(left)} Z M ${svgNumber(right - 14)} ${svgNumber(top)} V ${svgNumber(top + 14)} H ${svgNumber(right)}" /><text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text>`;
 		}
 		case 'package': {
 			const left = -component.bodyWidth / 2;
 			const top = -component.bodyHeight / 2;
-			return `<path ${paint} d="M ${svgNumber(left)} ${svgNumber(top + 12)} V ${svgNumber(-top)} H ${svgNumber(-left)} V ${svgNumber(top)} H ${svgNumber(left + Math.min(54, component.bodyWidth / 2))} L ${svgNumber(left + Math.min(64, component.bodyWidth / 2 + 10))} ${svgNumber(top + 12)} Z" /><text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="4" text-anchor="middle" font-size="13">${renderMathLabelTspans(component.label)}</text>`;
+			return `<path ${paint} d="M ${svgNumber(left)} ${svgNumber(top + 12)} V ${svgNumber(-top)} H ${svgNumber(-left)} V ${svgNumber(top)} H ${svgNumber(left + Math.min(54, component.bodyWidth / 2))} L ${svgNumber(left + Math.min(64, component.bodyWidth / 2 + 10))} ${svgNumber(top + 12)} Z" /><text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="13">${renderMathLabelTspans(component.label)}</text>`;
 		}
 		case 'component':
 		case 'artifact':
@@ -720,7 +725,7 @@ function umlComponentShape(component: UmlComponent, paint: string, nodePaint: st
 			const bottom = -top;
 			if (component.kind === 'activation') return `<rect ${paint} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" />`;
 			if (component.kind === 'fragment' || component.kind === 'interaction') {
-				return `<rect ${paint} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" /><path ${paint} d="M ${svgNumber(left)} ${svgNumber(top + 20)} H ${svgNumber(left + 58)} L ${svgNumber(left + 68)} ${svgNumber(top + 10)} V ${svgNumber(top)}" /><text class="schematic-uml-text" fill="currentColor" stroke="none" x="${svgNumber(left + 6)}" y="${svgNumber(top + 14)}" font-size="11">${component.kind === 'interaction' ? 'ref' : 'alt'}</text><text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="4" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text>`;
+				return `<rect ${paint} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" /><path ${paint} d="M ${svgNumber(left)} ${svgNumber(top + 20)} H ${svgNumber(left + 58)} L ${svgNumber(left + 68)} ${svgNumber(top + 10)} V ${svgNumber(top)}" /><text class="schematic-uml-text" ${TEXT_PAINT} x="${svgNumber(left + 6)}" y="${svgNumber(top + 14)}" font-size="11">${component.kind === 'interaction' ? 'ref' : 'alt'}</text><text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text>`;
 			}
 			const rx = component.kind === 'action' ? 10 : 1;
 			const dash = component.kind === 'region' ? ' stroke-dasharray="6 4"' : '';
@@ -731,7 +736,7 @@ function umlComponentShape(component: UmlComponent, paint: string, nodePaint: st
 					: component.kind === 'node' || component.kind === 'device' || component.kind === 'execution'
 						? `<path ${paint} d="M ${svgNumber(left)} ${svgNumber(top + 10)} l 12 -10 h ${svgNumber(component.bodyWidth)} l -12 10 M ${svgNumber(right)} ${svgNumber(top)} v ${svgNumber(component.bodyHeight - 10)} l -12 10" />`
 						: component.kind === 'partition' ? `<path ${paint} d="M ${svgNumber(left + 28)} ${svgNumber(top)} V ${svgNumber(bottom)}" />` : '';
-			return `<rect ${paint}${dash} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" rx="${rx}" />${icon}<text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="4" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text>`;
+			return `<rect ${paint}${dash} x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" rx="${rx}" />${icon}<text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="12">${renderMathLabelTspans(component.label)}</text>`;
 		}
 		case 'provided-interface':
 			return `<circle ${paint} cx="0" cy="0" r="10" />`;
@@ -763,7 +768,7 @@ function umlComponentShape(component: UmlComponent, paint: string, nodePaint: st
 		case 'state-junction':
 			return `<circle ${nodePaint} cx="0" cy="0" r="7" />`;
 		case 'history':
-			return `<circle ${paint} cx="0" cy="0" r="11" /><text class="schematic-uml-text" fill="currentColor" stroke="none" x="0" y="4" text-anchor="middle" font-size="11">H${component.variant === 'deep' ? '*' : ''}</text>`;
+			return `<circle ${paint} cx="0" cy="0" r="11" /><text class="schematic-uml-text" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="11">H${component.variant === 'deep' ? '*' : ''}</text>`;
 		case 'entry':
 		case 'exit':
 			return `<circle ${paint} cx="0" cy="0" r="10" />${component.kind === 'exit' ? `<path ${paint} d="M -6 -6 L 6 6 M 6 -6 L -6 6" />` : ''}`;
@@ -1014,8 +1019,7 @@ function reusableSymbolKey(component: SchematicComponent): string | undefined {
 function reusableSymbolDefinition(component: SchematicComponent, symbolId: string): string {
 	const vectorPaint =
 		'class="schematic-token" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" style="stroke:var(--schematic-vector,currentColor)"';
-	const nodePaint =
-		'class="schematic-token schematic-node-fill" fill="currentColor" stroke="none" style="fill:var(--schematic-vector,currentColor)"';
+	const nodePaint = `class="schematic-token schematic-node-fill" ${TEXT_PAINT} style="fill:var(--schematic-vector,currentColor)"`;
 	return `<g id="${symbolId}">${componentShape(component, vectorPaint, nodePaint)}</g>`;
 }
 
@@ -1130,7 +1134,7 @@ function connectionLabelMarkup(
 ): string {
 	if (connection.label === undefined) return '';
 	const point = connectionLabelPoint(route);
-	return `<text class="schematic-connection-label" fill="currentColor" stroke="none" x="${svgNumber(point.x)}" y="${svgNumber(point.y - 7)}" text-anchor="middle" font-size="11">${renderMathLabelTspans(connection.label)}</text>`;
+	return `<text class="schematic-connection-label" ${TEXT_PAINT} x="${svgNumber(point.x)}" y="${svgNumber(point.y - 7)}" text-anchor="middle" font-size="11">${renderMathLabelTspans(connection.label)}</text>`;
 }
 
 /**
@@ -1340,7 +1344,7 @@ function componentMarkup(
 	const innerText = componentInnerText(component);
 	const externalLabels = isUmlComponent(component)
 		? ''
-		: `<text class="schematic-designator" fill="currentColor" stroke="none" x="0" y="${anchors.designatorY}" text-anchor="middle" font-size="12" textLength="${anchors.designatorWidth}" lengthAdjust="spacingAndGlyphs">${id}</text><text class="schematic-label" fill="currentColor" stroke="none" x="0" y="${anchors.labelY}" text-anchor="middle" font-size="12" textLength="${anchors.labelWidth}" lengthAdjust="spacingAndGlyphs">${renderedLabel}</text>`;
+		: `<text class="schematic-designator" ${TEXT_PAINT} x="0" y="${anchors.designatorY}" text-anchor="middle" font-size="12" textLength="${anchors.designatorWidth}" ${LENGTH_FIT}>${id}</text><text class="schematic-label" ${TEXT_PAINT} x="0" y="${anchors.labelY}" text-anchor="middle" font-size="12" textLength="${anchors.labelWidth}" ${LENGTH_FIT}>${renderedLabel}</text>`;
 	return `<g class="schematic-component"${dataAttributes} transform="translate(${svgNumber(component.x)} ${svgNumber(component.y)})"${accessibility}>${vector}${glow}${innerText}${externalLabels}${hotspots}</g>`;
 }
 

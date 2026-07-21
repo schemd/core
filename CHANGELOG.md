@@ -2,7 +2,7 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
-## [Unreleased — 0.3.2]
+## [0.3.2] - 07/20/2026
 
 ### Added
 
@@ -21,6 +21,7 @@ All notable changes to `@schemd/core` are recorded here. Dates describe actual n
 - Mixed-curve wire contact checks use bounded spatial buckets; all-orthogonal documents retain the specialized crossing pass and its bridge ownership order.
 - Open arrow, triangle, and diamond markers no longer assume a white or theme-surface fill. A zero-width semantic carrier places the marker while the visible trace is inset beneath its genuinely transparent interior, including in interactive hover states.
 - Bridge control points now remain in traversal order, so the final routed point is always the actual target endpoint rather than a bridge extremum.
+- The component type guards and the SVG number formatter now have exactly one implementation each: the parser and renderer import layout's canonical guards, `svgNumber` is an alias of `formatNumber` (proven byte-identical across 2M sampled values), and the renderer's 24 repeated text-paint and 8 `lengthAdjust` attribute literals are shared fragments. Output is byte-identical.
 
 ### Fixed
 
@@ -33,7 +34,7 @@ All notable changes to `@schemd/core` are recorded here. Dates describe actual n
 
 ### Verified
 
-- Compiler bundle: 102,622 B minified, 30,241 B gzip — 479 B below the 30,720 B gate.
+- Compiler bundle: 101,672 B minified, 30,348 B gzip — 372 B below the 30,720 B gate.
 - Coverage: 100% statements, branches, functions, and lines across 143 unit, stress, and property tests; 7/7 targeted mutants killed; 3 Chromium visual goldens.
 - Across three isolated Node.js 26.4.0 / Apple Silicon runs, the median warm run measured 0.249 ms for the representative compile, 5.727 ms at the 512-component ceiling, and 10.705 ms for the occupancy-aware dense 16×16 crossing fixture.
 - Runtime dependencies: zero.

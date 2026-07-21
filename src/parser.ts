@@ -68,7 +68,12 @@ import {
 	type UmlSizedComponent,
 	type UmlStateComponent
 } from './types.js';
-import { validateDocumentGeometry } from './layout.js';
+import {
+	isClassicalGate,
+	isDigitalComponent,
+	isQuantumSpecial,
+	validateDocumentGeometry
+} from './layout.js';
 import { mathLabelTextWidth } from './math-label.js';
 import { cacheParsedSchematicRoutes } from './route-cache.js';
 import {
@@ -1349,26 +1354,6 @@ function validGatePort(component: ClassicalGateComponent, port: string): boolean
 	return match[1] === 'in'
 		? index <= component.inputs && index >= 1
 		: index <= component.outputs && index >= 1;
-}
-
-/**
- * Narrow a component union to a classical gate.
- *
- * @param component - Any parsed component.
- * @returns Whether its discriminant belongs to the classical-gate registry.
- */
-function isClassicalGate(component: SchematicComponent): component is ClassicalGateComponent {
-	return CLASSICAL_GATE_KINDS.includes(component.kind as ClassicalGateComponent['kind']);
-}
-
-function isDigitalComponent(component: SchematicComponent): component is DigitalComponent {
-	return DIGITAL_COMPONENT_KINDS.includes(component.kind as DigitalComponent['kind']);
-}
-
-function isQuantumSpecial(
-	component: SchematicComponent
-): component is QuantumSpecialComponent {
-	return QUANTUM_SPECIAL_KINDS.includes(component.kind as QuantumSpecialComponent['kind']);
 }
 
 /** Validate an indexed `inN`/`outN` terminal pair. */

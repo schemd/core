@@ -11,7 +11,7 @@ Version 0.3.2 requires Node.js 24 or newer. The compiler is held below an enforc
 ## Install
 
 ```sh
-npm install @schemd/core
+npm i @schemd/core # or bun add @schemd/core or pnpm add @schemd/core or yarn add @schemd/core or jspm install @schemd/core
 ```
 
 ## Compile
@@ -63,13 +63,13 @@ Orthogonal routes reuse one document-level spatial index instead of rescanning c
 - Quantum: Hadamard, polished general `qgate`, named single-qubit gates, measurement, reset, preparation, controls, swaps, controlled operators, barriers, delays, and classical bit/register nodes.
 - UML: structural, component/deployment, activity, sequence/interaction, and state-machine nodes with first-class relation semantics.
 
-The exhaustive variants and stable port names are in the [component reference](./docs/COMPONENTS.md). Grammar/options, quarter-turn behavior, conventions, output modes, and migration details are documented separately:
+The single source of documentation truth is the official site — versioned per release line, with every example compiled by the real engine:
 
-- [Grammar and options](./docs/GRAMMAR.md)
-- [Orientation and geometry](./docs/ORIENTATION.md)
-- [Standards and conventions](./docs/STANDARDS.md)
-- [SVG output modes](./docs/OUTPUT-MODES.md)
-- [Performance and size](./docs/PERFORMANCE.md)
+- [Component reference](https://schemd.johnowolabiidogun.dev/docs/0.3/component-reference)
+- [Grammar and options](https://schemd.johnowolabiidogun.dev/docs/0.3/grammar)
+- [Orientation and geometry](https://schemd.johnowolabiidogun.dev/docs/0.3/responsive-svg)
+- [SVG output modes](https://schemd.johnowolabiidogun.dev/docs/0.3/output-modes)
+- [Performance and size](https://schemd.johnowolabiidogun.dev/docs/0.3/performance)
 - [Migration from 0.2.x](./docs/MIGRATION-0.3.md)
 
 ## Digital example
