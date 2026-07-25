@@ -429,10 +429,10 @@ A.out -> B.in #cyan [digital]`;
 	test('locks representative generated-SVG byte counts and repeated-symbol amortization', () => {
 		const options = { ...fence, idPrefix: 'size-regression' };
 		const fixtures = [
-			['resistor:R "R" at (100,100) #amber', 1_411],
+			['resistor:R "R" at (100,100) #amber', 1_348],
 			[
 				'resistor:R1 "R" at (100,100) #amber\nresistor:R2 "R" at (300,100) #amber\nresistor:R3 "R" at (500,100) #amber',
-				2_476
+				2_287
 			]
 		] as const;
 		for (const [source, expectedBytes] of fixtures) {

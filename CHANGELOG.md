@@ -2,6 +2,22 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
+## [0.3.4] - 07/25/2026
+
+### Added
+
+- Connectivity is now a first-class artifact. `buildNetlist` returns the nodes, nets, and edges behind a validated document, `verifyNetlist` runs deterministic design rules over that model, and `inspectSchematic` does both in one call. Seven rules ship: shorted supply rails, conflicting bus widths, mixed signal domains, unconnected components, duplicate connections, contended digital drivers, and disconnected subcircuits. Diagnostics carry a stable code, a severity, the subjects involved, and the source line wherever a declaration owns the fault.
+- `SCHEMATIC_RULES` publishes the rule catalogue — code, severity, and summary — so hosts can document or filter checks without hard-coding strings. The module is also reachable as the `@schemd/core/netlist` subpath export.
+
+### Changed
+
+- Orthogonal routing no longer re-answers the same question. Obstacle participation is resolved once per route rather than once per segment query, obstacles spanning several buckets are examined once, and the innermost slab test allocates nothing. Dense 16x16 routing drops from 10.4 ms to 7.5 ms with byte-identical output.
+- Every component emitted two label elements carrying identical paint. With a stylesheet present that paint now lives in the stylesheet; without one it travels on a single inherited group. Text lengths round through the shared number formatter, so `textLength="17.849999999999998"` is gone. A 512-component diagram falls from 279,243 to 246,987 bytes, a repeated instance from 541 to 478 bytes, and the Chromium goldens are unchanged.
+
+### Verified
+
+- Netlist extraction and every rule are covered to the project's 100% statement, branch, function, and line thresholds, including documents whose edges name components that were never declared.
+
 ## [0.3.3] - 07/21/2026
 
 ### Changed

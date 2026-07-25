@@ -17,6 +17,21 @@ export {
 	type SchematicWireSource
 } from './compiler.js';
 export {
+	buildNetlist,
+	inspectSchematic,
+	verifyNetlist,
+	SCHEMATIC_RULES,
+	SCHEMATIC_RULE_CODES,
+	type NetlistEdge,
+	type NetlistNet,
+	type NetlistNode,
+	type NetlistTerminal,
+	type SchematicDiagnostic,
+	type SchematicDiagnosticSeverity,
+	type SchematicNetlist,
+	type SchematicRuleCode
+} from './netlist.js';
+export {
 	mathLabelGlyphLength,
 	mathLabelTextWidth,
 	mathLabelText,

@@ -15,6 +15,10 @@ Want to help? Open the claim link before starting a large change so work is not 
 
 - [ ] **P1-09 · Publish a deterministic typography contract.** Done when supported font behavior is explicit and long UML rows wrap or fail clearly instead of spilling or distorting. [Claim P1-09](https://github.com/schemd/core/issues/new?template=roadmap.yml&title=%5BROADMAP%5D%20P1-09%20%E2%80%94%20Deterministic%20typography)
 
+## Shipped · connectivity
+
+- [x] **P1-10 · Expose the topology the compiler already knows.** Shipped in 0.3.4: `buildNetlist`, `verifyNetlist`, and `inspectSchematic` return nodes, nets, and edges and check seven design rules against them. Next along this line is a rule-suppression syntax in the fence, so a document can accept a known warning without silencing the whole check.
+
 ## Next · language and footprint
 
 - [ ] **P1-01 · Open the built-in symbol architecture.** Done when a typed registry owns parsing, ports, bounds, and primitives, and a published support matrix replaces broad “every diagram” claims. [Claim P1-01](https://github.com/schemd/core/issues/new?template=roadmap.yml&title=%5BROADMAP%5D%20P1-01%20%E2%80%94%20Built-in%20symbol%20registry)

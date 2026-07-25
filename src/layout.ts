@@ -1187,6 +1187,9 @@ interface IndexedRoutingRectangle {
 	readonly kind: 'body' | 'expanded' | 'label';
 	readonly rectangle: SchematicRectangle;
 	seen: number;
+	/** Epoch the cached `participates` answer below was computed for. */
+	participationEpoch: number;
+	participates: boolean;
 }
 
 interface RoutingIndex {
@@ -1196,6 +1199,16 @@ interface RoutingIndex {
 	nextWireKey: number;
 	rectangleQuery: number;
 	wireQuery: number;
+	/*
+	 * Whether an obstacle participates depends only on (mode, fromId, toId),
+	 * which stay fixed across the dozens of segment queries one route makes.
+	 * These fields let the answer be computed once per obstacle per route
+	 * instead of once per segment test.
+	 */
+	participationEpoch: number;
+	participationMode: RoutingCollisionMode | undefined;
+	participationFrom: string;
+	participationTo: string;
 }
 
 function addRoutingRectangle(
@@ -1204,7 +1217,7 @@ function addRoutingRectangle(
 	kind: IndexedRoutingRectangle['kind'],
 	rectangle: SchematicRectangle
 ): void {
-	const entry = { owner, kind, rectangle, seen: 0 };
+	const entry = { owner, kind, rectangle, seen: 0, participationEpoch: 0, participates: false };
 	index.rectangles.push(entry);
 	const minimum = Math.floor(rectangle.minX / CROSSING_BUCKET_SIZE);
 	const maximum = Math.floor(rectangle.maxX / CROSSING_BUCKET_SIZE);
@@ -1242,7 +1255,11 @@ function createRoutingIndex(components: ReadonlyMap<string, SchematicComponent>)
 		wireBuckets: new Map(),
 		nextWireKey: 0,
 		rectangleQuery: 0,
-		wireQuery: 0
+		wireQuery: 0,
+		participationEpoch: 0,
+		participationMode: undefined,
+		participationFrom: '',
+		participationTo: ''
 	};
 	for (const component of components.values()) {
 		addRoutingRectangle(index, component.id, 'body', componentObstacleRectangle(component, 0));
@@ -1286,18 +1303,28 @@ function segmentIntersectsRectangle(
 			Math.min(start.y, end.y) < rectangle.maxY
 		);
 	}
+	/*
+	 * Slab test, written out per axis. The tuple-array form this replaced
+	 * allocated two arrays on every call, and this is the innermost function of
+	 * the router — the same arithmetic, none of the garbage.
+	 */
 	let minimum = 0;
 	let maximum = 1;
-	for (const [origin, delta, low, high] of [
-		[start.x, end.x - start.x, rectangle.minX, rectangle.maxX],
-		[start.y, end.y - start.y, rectangle.minY, rectangle.maxY]
-	] as const) {
-		const first = (low - origin) / delta;
-		const second = (high - origin) / delta;
-		minimum = Math.max(minimum, Math.min(first, second));
-		maximum = Math.min(maximum, Math.max(first, second));
-		if (minimum >= maximum) return false;
-	}
+
+	const deltaX = end.x - start.x;
+	const firstX = (rectangle.minX - start.x) / deltaX;
+	const secondX = (rectangle.maxX - start.x) / deltaX;
+	minimum = Math.max(minimum, Math.min(firstX, secondX));
+	maximum = Math.min(maximum, Math.max(firstX, secondX));
+	if (minimum >= maximum) return false;
+
+	const deltaY = end.y - start.y;
+	const firstY = (rectangle.minY - start.y) / deltaY;
+	const secondY = (rectangle.maxY - start.y) / deltaY;
+	minimum = Math.max(minimum, Math.min(firstY, secondY));
+	maximum = Math.min(maximum, Math.max(firstY, secondY));
+	if (minimum >= maximum) return false;
+
 	return maximum > 0 && minimum < 1;
 }
 
@@ -1328,10 +1355,35 @@ function indexedSegmentCollision(
 	const minimum = Math.floor((Math.min(start.x, end.x) - margin) / CROSSING_BUCKET_SIZE);
 	const maximum = Math.floor((Math.max(start.x, end.x) + margin) / CROSSING_BUCKET_SIZE);
 	const query = ++index.rectangleQuery;
+	/*
+	 * One route asks dozens of segment questions with the same mode and
+	 * endpoints, and each question used to re-run the participation predicate
+	 * (two string comparisons) for every obstacle in range — a fifth of
+	 * dense-routing compile time. Bump an epoch only when the triple actually
+	 * changes, and the answer is computed once per obstacle per route.
+	 */
+	if (
+		index.participationMode !== mode ||
+		index.participationFrom !== fromId ||
+		index.participationTo !== toId
+	) {
+		index.participationMode = mode;
+		index.participationFrom = fromId;
+		index.participationTo = toId;
+		index.participationEpoch += 1;
+	}
+	const epoch = index.participationEpoch;
 	for (let bucket = minimum; bucket <= maximum; bucket += 1) {
 		for (const entry of index.rectangleBuckets.get(bucket) ?? []) {
-			if (entry.seen === query || !rectangleParticipates(entry, mode, fromId, toId)) continue;
+			/* Stamp before testing: an obstacle spanning several buckets was
+			   otherwise re-examined once per bucket. */
+			if (entry.seen === query) continue;
 			entry.seen = query;
+			if (entry.participationEpoch !== epoch) {
+				entry.participationEpoch = epoch;
+				entry.participates = rectangleParticipates(entry, mode, fromId, toId);
+			}
+			if (!entry.participates) continue;
 			const rectangle =
 				margin === 0
 					? entry.rectangle
@@ -1697,6 +1749,15 @@ function routeBetweenEscapes(
 			bestScore = score;
 		}
 	};
+	/*
+	 * A lane can only win if its bare orthogonal length already beats the best
+	 * score; bend penalties and occupancy only add to it. Testing that first
+	 * skips the point array, the compaction pass and the obstacle sweep for the
+	 * lanes that cannot possibly win — the same candidates are evaluated, in the
+	 * same order, with the same tie-breaks.
+	 */
+	const spanX = Math.abs(end.x - start.x);
+	const spanY = Math.abs(end.y - start.y);
 	const yLanes = uniqueSorted([
 		start.y,
 		end.y,
@@ -1705,6 +1766,7 @@ function routeBetweenEscapes(
 	]);
 	for (const y of yLanes) {
 		if (bounds !== undefined && (y < 0 || y > bounds.height)) continue;
+		if (Math.abs(y - start.y) + spanX + Math.abs(end.y - y) >= bestScore) continue;
 		consider([start, { x: start.x, y }, { x: end.x, y }, end]);
 	}
 	const xLanes = uniqueSorted([
@@ -1715,6 +1777,7 @@ function routeBetweenEscapes(
 	]);
 	for (const x of xLanes) {
 		if (bounds !== undefined && (x < 0 || x > bounds.width)) continue;
+		if (Math.abs(x - start.x) + spanY + Math.abs(end.x - x) >= bestScore) continue;
 		consider([start, { x, y: start.y }, { x, y: end.y }, end]);
 	}
 	return best ?? searchOrthogonalRoute(start, end, obstacles, index, fromId, toId, netId, bounds, line);

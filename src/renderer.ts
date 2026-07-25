@@ -71,7 +71,7 @@ export const MAX_SVG_OUTPUT_BYTES = MAX_SCHEMATIC_SVG_OUTPUT_BYTES;
 
 /** Minimal theme-aware vector styles embedded by non-default output modes. */
 const STATIC_SVG_STYLES =
-	'.schematic-token{fill:none;stroke:var(--schematic-vector,var(--schematic-vector-fallback,currentColor));stroke-linecap:round;stroke-linejoin:round;stroke-width:var(--schematic-stroke-width,1.65);vector-effect:non-scaling-stroke}.schematic-marker-carrier{stroke-width:0!important}.schematic-node-fill{fill:var(--schematic-vector,var(--schematic-vector-fallback,currentColor))}.schematic-designator,.schematic-label,.schematic-gate-symbol,.schematic-quantum-detail,.schematic-pin-label,.schematic-uml-text,.schematic-connection-label{fill:currentColor}.schematic-uml-row{font-size:12px}.schematic-uml-stereotype{font-size:11px}.schematic-connection-label{font-size:11px;paint-order:stroke;stroke:var(--schematic-surface,#fff);stroke-width:4;stroke-linejoin:round}.schematic-surface{fill:var(--schematic-surface,transparent)}.schematic-grid-line{fill:none;stroke:var(--schematic-grid,currentColor);stroke-width:1;opacity:.12;vector-effect:non-scaling-stroke}';
+	'.schematic-token{fill:none;stroke:var(--schematic-vector,var(--schematic-vector-fallback,currentColor));stroke-linecap:round;stroke-linejoin:round;stroke-width:var(--schematic-stroke-width,1.65);vector-effect:non-scaling-stroke}.schematic-marker-carrier{stroke-width:0!important}.schematic-node-fill{fill:var(--schematic-vector,var(--schematic-vector-fallback,currentColor))}.schematic-designator,.schematic-label,.schematic-gate-symbol,.schematic-quantum-detail,.schematic-pin-label,.schematic-uml-text,.schematic-connection-label{fill:currentColor}.schematic-designator,.schematic-label{stroke:none;text-anchor:middle;font-size:12px}.schematic-uml-row{font-size:12px}.schematic-uml-stereotype{font-size:11px}.schematic-connection-label{font-size:11px;paint-order:stroke;stroke:var(--schematic-surface,#fff);stroke-width:4;stroke-linejoin:round}.schematic-surface{fill:var(--schematic-surface,transparent)}.schematic-grid-line{fill:none;stroke:var(--schematic-grid,currentColor);stroke-width:1;opacity:.12;vector-effect:non-scaling-stroke}';
 
 /** Keyboard and pointer hotspot rules emitted only by `full` mode. */
 const HOOK_SVG_STYLES =
@@ -97,6 +97,9 @@ interface NormalizedCompileOptions extends CompileSchematicOptions {
 const TEXT_PAINT = 'fill="currentColor" stroke="none"';
 /** Shared `textLength` fitting policy for width-clamped labels. */
 const LENGTH_FIT = 'lengthAdjust="spacingAndGlyphs"';
+
+/** Shared geometry of the designator/label pair every component emits. */
+const TEXT_LABEL_GEOMETRY = 'text-anchor="middle" font-size="12"';
 
 const NODE_HOOK = 1;
 const PORT_HOOK = 2;
@@ -1342,9 +1345,21 @@ function componentMarkup(
 			? `<g${vectorIdAttribute} class="schematic-component-vector"${vectorTransform}>${componentShape(component)}</g>`
 			: `<use${vectorIdAttribute} ${colorAttributes(component.color, 'schematic-component-vector')} href="#${symbolId}"${vectorTransform} />`;
 	const innerText = componentInnerText(component);
-	const externalLabels = isUmlComponent(component)
+	/*
+	 * Every component emits these two labels, so their shared paint is the
+	 * densest boilerplate in the document. With styles present the stylesheet
+	 * already carries it (see STATIC_SVG_STYLES); without styles the attributes
+	 * are required, or the labels inherit the root's outline paint.
+	 */
+	const labels = isUmlComponent(component)
 		? ''
-		: `<text class="schematic-designator" ${TEXT_PAINT} x="0" y="${anchors.designatorY}" text-anchor="middle" font-size="12" textLength="${anchors.designatorWidth}" ${LENGTH_FIT}>${id}</text><text class="schematic-label" ${TEXT_PAINT} x="0" y="${anchors.labelY}" text-anchor="middle" font-size="12" textLength="${anchors.labelWidth}" ${LENGTH_FIT}>${renderedLabel}</text>`;
+		: `<text class="schematic-designator" x="0" y="${svgNumber(anchors.designatorY)}" textLength="${svgNumber(anchors.designatorWidth)}" ${LENGTH_FIT}>${id}</text><text class="schematic-label" x="0" y="${svgNumber(anchors.labelY)}" textLength="${svgNumber(anchors.labelWidth)}" ${LENGTH_FIT}>${renderedLabel}</text>`;
+	/* Without a stylesheet the paint travels on one inherited group instead of
+	   on each label — same pixels, one shared declaration per component. */
+	const externalLabels =
+		styles || labels === ''
+			? labels
+			: `<g ${TEXT_PAINT} ${TEXT_LABEL_GEOMETRY}>${labels}</g>`;
 	return `<g class="schematic-component"${dataAttributes} transform="translate(${svgNumber(component.x)} ${svgNumber(component.y)})"${accessibility}>${vector}${glow}${innerText}${externalLabels}${hotspots}</g>`;
 }
 

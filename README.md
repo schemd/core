@@ -6,7 +6,7 @@
 
 `schemd`—pronounced like “skemd” (`/skɛmd/`)—is a strict, deterministic text-to-SVG compiler for electrical, digital, quantum, and UML diagrams. It has zero runtime dependencies and does not use a DOM, Canvas, browser layout, external fonts, raster assets, or `getBBox()`.
 
-Version 0.3.2 requires Node.js 24 or newer. The compiler is held below an enforced 30 KiB gzip ceiling.
+Version 0.3.4 requires Node.js 24 or newer. The compiler is held below an enforced 30 KiB gzip ceiling.
 
 ## Install
 
@@ -128,6 +128,43 @@ action:DEPLOY "Deploy" at (480, 340) #cyan [width=150 height=70]
 EDGE.right -> FW.left #blue [assembly]
 DEPLOY.top -> FW.bottom #cyan [control-flow]
 ```
+
+## Netlist and design rules
+
+A compiled diagram is not only a picture. The parser already resolves net topology and the layout pass already enumerates ports, so the same source can be inspected: what is connected to what, and which of those connections are mistakes.
+
+```ts
+import { inspectSchematic, parseSchematic, parseSchematicFence } from "@schemd/core";
+
+const fence = parseSchematicFence('schemd bounds="900x400" title="Supply"')!;
+const document = parseSchematic(
+  `source:V1 "AC" at (100, 150) #blue [type=voltage-ac]
+resistor:R1 "1 k" at (360, 150) #amber
+ground:GND "0 V" at (620, 150) #slate
+
+V1.positive -> R1.in #blue [line net=rail]
+R1.out -> GND.in #slate [line net=rail]`,
+  fence,
+);
+
+const { netlist, diagnostics } = inspectSchematic(document);
+// netlist.nets[0].terminals -> V1.positive, R1.in, R1.out, GND.in
+// diagnostics[0] -> error shorted-supply on line 5
+```
+
+`buildNetlist` returns the model — nodes with their stable ports, nets with their terminals, domains, widths, and source lines, and one edge per declared connection. `verifyNetlist` runs the rules over that model, and `inspectSchematic` does both.
+
+| Code                      | Severity  | Fails when                                                        |
+| ------------------------- | --------- | ----------------------------------------------------------------- |
+| `shorted-supply`          | `error`   | Two supply rails — a source positive, a power rail, or a ground — share one net. |
+| `width-mismatch`          | `error`   | One net carries connections declaring different bus widths.        |
+| `domain-mismatch`         | `error`   | One net mixes signal domains, such as quantum and digital.         |
+| `unconnected-component`   | `warning` | A declared component takes part in no connection.                  |
+| `duplicate-connection`    | `warning` | The same pair of terminals is connected more than once.            |
+| `multiple-drivers`        | `warning` | Two digital outputs drive the same net.                            |
+| `disconnected-subcircuit` | `info`    | The diagram contains more than one independent connected group.    |
+
+Rules are deliberately narrow. A source's `negative` terminal sharing a node with ground is the return path of almost every circuit ever drawn, so only two *rails* on one net short; two analog terminals sharing a node is ordinary topology, so contention is reported for digital domains only. `SCHEMATIC_RULES` publishes each code with its severity and summary, and diagnostics arrive ordered by severity, then source line, then code — stable enough to assert against in a test or print in a CI log.
 
 ## Output modes
 
