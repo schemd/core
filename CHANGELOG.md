@@ -2,6 +2,19 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
+## [0.3.5] - 07/25/2026
+
+### Changed
+
+- The router's spatial hash addresses both axes. Cells were keyed on x alone, so a single column held every obstacle stacked along it and a short segment paid the participation predicate and a slab test once per row — the quadratic term in routing a tall document. Obstacle and wire cells are now keyed on column and row, with a y-span rejection ahead of the exact predicates. Dense 16x16 routing drops from 7.7 ms to 4.1 ms, and a 512-component chain — one connection per component, the shape that provoked the old behaviour — from 40.4 ms to 16.3 ms. Output is byte-identical.
+- Router lane candidates are gathered without intermediate arrays. Each list was built by spreading a two-element array per obstacle into a set; obstacle bounds are now added to the set directly. De-duplication still precedes the sort, because a grid repeats the same few coordinates on every row and collapsing runs after sorting proved markedly slower on exactly those documents.
+- The slab test's first early-out is gone. The axis-aligned cases return before it, so both deltas are non-zero and no NaN can short-circuit; the clips are monotone, so an empty x interval stays empty and the second early-out already returns the same answer.
+
+### Verified
+
+- Output equivalence is checked against 173 documents — every diagram in the published documentation plus seeded random grids, including the 53 that compile to a diagnostic — by comparing SHA-256 digests of the compiled SVG before and after. All three changes are byte-identical to 0.3.4.
+- Coverage, the targeted mutation gate, and the Chromium goldens all hold at their release thresholds. Removing the early-out kept branch coverage at 100% rather than stranding a branch the new filters made unreachable.
+
 ## [0.3.4] - 07/25/2026
 
 ### Added

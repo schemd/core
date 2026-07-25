@@ -15,6 +15,10 @@ Want to help? Open the claim link before starting a large change so work is not 
 
 - [ ] **P1-09 · Publish a deterministic typography contract.** Done when supported font behavior is explicit and long UML rows wrap or fail clearly instead of spilling or distorting. [Claim P1-09](https://github.com/schemd/core/issues/new?template=roadmap.yml&title=%5BROADMAP%5D%20P1-09%20%E2%80%94%20Deterministic%20typography)
 
+## Shipped · routing cost
+
+- [x] **P2-05 · Address the obstacle index on both axes.** Shipped in 0.3.5: obstacle and wire cells are keyed on column and row instead of column alone, so a segment no longer sweeps every obstacle stacked in its column. Dense 16x16 routing drops from 7.7 ms to 4.1 ms and a 512-component chain from 40.4 ms to 16.3 ms, with byte-identical output across the 173-document equivalence corpus. What remains superlinear is the compressed-grid A* fallback, which rebuilds its lane set per route; bounding that set to the route's own corridor would change which path wins, so it is a correctness question before it is a performance one.
+
 ## Shipped · connectivity
 
 - [x] **P1-10 · Expose the topology the compiler already knows.** Shipped in 0.3.4: `buildNetlist`, `verifyNetlist`, and `inspectSchematic` return nodes, nets, and edges and check seven design rules against them. Next along this line is a rule-suppression syntax in the fence, so a document can accept a known warning without silencing the whole check.

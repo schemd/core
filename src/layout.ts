@@ -238,6 +238,20 @@ const ROUTER_CROSSING_PENALTY = 8;
 const ROUTER_CHANNEL_REUSE_PENALTY = 16_384;
 /** Spatial-hash cell size used to bound wire-crossing comparisons. */
 const CROSSING_BUCKET_SIZE = 64;
+/**
+ * Column stride for the obstacle hash's composite cell key.
+ *
+ * Cells are addressed on both axes, so a cell key is `column * stride + row`
+ * (the column term is hoisted out of each row loop). Schematic bounds cap at
+ * 4096 units — 64 cells per axis — and only label overhang and routing margins
+ * reach outside them, so a stride this large keeps every reachable
+ * (column, row) pair distinct.
+ */
+const BUCKET_COLUMN_STRIDE = 8192;
+
+/** Tolerance segmentContact treats as touching; spatial filters must match it. */
+const CONTACT_EPSILON = 1e-9;
+
 /** Smallest bridge radius that survives three-decimal SVG serialization. */
 const MIN_RENDERABLE_BRIDGE_RADIUS = 0.001;
 
@@ -1219,12 +1233,17 @@ function addRoutingRectangle(
 ): void {
 	const entry = { owner, kind, rectangle, seen: 0, participationEpoch: 0, participates: false };
 	index.rectangles.push(entry);
-	const minimum = Math.floor(rectangle.minX / CROSSING_BUCKET_SIZE);
-	const maximum = Math.floor(rectangle.maxX / CROSSING_BUCKET_SIZE);
-	for (let bucket = minimum; bucket <= maximum; bucket += 1) {
-		const entries = index.rectangleBuckets.get(bucket) ?? [];
-		entries.push(entry);
-		index.rectangleBuckets.set(bucket, entries);
+	const lowestColumn = Math.floor(rectangle.minX / CROSSING_BUCKET_SIZE);
+	const highestColumn = Math.floor(rectangle.maxX / CROSSING_BUCKET_SIZE);
+	const lowestRow = Math.floor(rectangle.minY / CROSSING_BUCKET_SIZE);
+	const highestRow = Math.floor(rectangle.maxY / CROSSING_BUCKET_SIZE);
+	for (let column = lowestColumn; column <= highestColumn; column += 1) {
+		const columnKey = column * BUCKET_COLUMN_STRIDE;
+		for (let row = lowestRow; row <= highestRow; row += 1) {
+			const entries = index.rectangleBuckets.get(columnKey + row) ?? [];
+			entries.push(entry);
+			index.rectangleBuckets.set(columnKey + row, entries);
+		}
 	}
 }
 
@@ -1316,7 +1335,14 @@ function segmentIntersectsRectangle(
 	const secondX = (rectangle.maxX - start.x) / deltaX;
 	minimum = Math.max(minimum, Math.min(firstX, secondX));
 	maximum = Math.min(maximum, Math.max(firstX, secondX));
-	if (minimum >= maximum) return false;
+	/*
+	 * No early-out after the first slab: it can only repeat the second one. The
+	 * clips are monotone — `minimum` never falls and `maximum` never rises — so
+	 * an empty x interval stays empty once y narrows it, and the axis-aligned
+	 * returns above guarantee both deltas are non-zero, leaving no NaN to
+	 * short-circuit. Callers now reject on the y span before reaching here, so
+	 * the branch cost bytes and coverage for an answer the next test repeats.
+	 */
 
 	const deltaY = end.y - start.y;
 	const firstY = (rectangle.minY - start.y) / deltaY;
@@ -1354,6 +1380,8 @@ function indexedSegmentCollision(
 ): IndexedRoutingRectangle | undefined {
 	const minimum = Math.floor((Math.min(start.x, end.x) - margin) / CROSSING_BUCKET_SIZE);
 	const maximum = Math.floor((Math.max(start.x, end.x) + margin) / CROSSING_BUCKET_SIZE);
+	const lowestRow = Math.floor((Math.min(start.y, end.y) - margin) / CROSSING_BUCKET_SIZE);
+	const highestRow = Math.floor((Math.max(start.y, end.y) + margin) / CROSSING_BUCKET_SIZE);
 	const query = ++index.rectangleQuery;
 	/*
 	 * One route asks dozens of segment questions with the same mode and
@@ -1373,27 +1401,44 @@ function indexedSegmentCollision(
 		index.participationEpoch += 1;
 	}
 	const epoch = index.participationEpoch;
-	for (let bucket = minimum; bucket <= maximum; bucket += 1) {
-		for (const entry of index.rectangleBuckets.get(bucket) ?? []) {
-			/* Stamp before testing: an obstacle spanning several buckets was
-			   otherwise re-examined once per bucket. */
-			if (entry.seen === query) continue;
-			entry.seen = query;
-			if (entry.participationEpoch !== epoch) {
-				entry.participationEpoch = epoch;
-				entry.participates = rectangleParticipates(entry, mode, fromId, toId);
+	/*
+	 * Cells are visited on both axes. Addressing columns alone meant one column
+	 * held every obstacle stacked along it, so a short segment in a tall
+	 * schematic paid the participation predicate and a Liang-Barsky clip once
+	 * per row — the quadratic term in dense-routing compile time.
+	 *
+	 * The y-span rejection below still earns its keep, because a cell is
+	 * CROSSING_BUCKET_SIZE tall and an entry sharing the cell can still miss the
+	 * segment. Neither filter can change an answer: a segment whose y range
+	 * misses the margin-expanded rectangle can never intersect it.
+	 */
+	const lowestY = Math.min(start.y, end.y) - margin;
+	const highestY = Math.max(start.y, end.y) + margin;
+	for (let column = minimum; column <= maximum; column += 1) {
+		const columnKey = column * BUCKET_COLUMN_STRIDE;
+		for (let row = lowestRow; row <= highestRow; row += 1) {
+			for (const entry of index.rectangleBuckets.get(columnKey + row) ?? []) {
+				/* Stamp before testing: an obstacle spanning several cells was
+				   otherwise re-examined once per cell. */
+				if (entry.seen === query) continue;
+				entry.seen = query;
+				if (entry.rectangle.minY > highestY || entry.rectangle.maxY < lowestY) continue;
+				if (entry.participationEpoch !== epoch) {
+					entry.participationEpoch = epoch;
+					entry.participates = rectangleParticipates(entry, mode, fromId, toId);
+				}
+				if (!entry.participates) continue;
+				const rectangle =
+					margin === 0
+						? entry.rectangle
+						: {
+								minX: entry.rectangle.minX - margin,
+								minY: entry.rectangle.minY - margin,
+								maxX: entry.rectangle.maxX + margin,
+								maxY: entry.rectangle.maxY + margin
+							};
+				if (segmentIntersectsRectangle(start, end, rectangle)) return entry;
 			}
-			if (!entry.participates) continue;
-			const rectangle =
-				margin === 0
-					? entry.rectangle
-					: {
-							minX: entry.rectangle.minX - margin,
-							minY: entry.rectangle.minY - margin,
-							maxX: entry.rectangle.maxX + margin,
-							maxY: entry.rectangle.maxY + margin
-						};
-			if (segmentIntersectsRectangle(start, end, rectangle)) return entry;
 		}
 	}
 	return undefined;
@@ -1490,19 +1535,30 @@ function wireSegmentCost(
 ): number {
 	const minimum = Math.floor(Math.min(start.x, end.x) / CROSSING_BUCKET_SIZE);
 	const maximum = Math.floor(Math.max(start.x, end.x) / CROSSING_BUCKET_SIZE);
+	const lowestRow = Math.floor(Math.min(start.y, end.y) / CROSSING_BUCKET_SIZE);
+	const highestRow = Math.floor(Math.max(start.y, end.y) / CROSSING_BUCKET_SIZE);
 	const query = ++index.wireQuery;
 	const candidate: TraceSegment = { id: -1, routeIndex: -1, start, end, orthogonal: true, seen: 0 };
+	/* Same y-range false-positive removal validateUniversalWireContacts uses,
+	   with segmentContact's own tolerance so a grazing contact still counts. */
+	const lowestY = Math.min(start.y, end.y) - CONTACT_EPSILON;
+	const highestY = Math.max(start.y, end.y) + CONTACT_EPSILON;
 	let cost = 0;
-	for (let bucket = minimum; bucket <= maximum; bucket += 1) {
-		for (const previous of index.wireBuckets.get(bucket) ?? []) {
-			if (previous.seen === query) continue;
-			previous.seen = query;
-			if (netId !== undefined && previous.netId === netId) continue;
-			const contact = segmentContact(candidate, previous);
-			if (contact !== undefined) {
-				cost += contact.strict && !contact.overlap && previous.orthogonal
-					? ROUTER_CROSSING_PENALTY
-					: ROUTER_CHANNEL_REUSE_PENALTY;
+	for (let column = minimum; column <= maximum; column += 1) {
+		const columnKey = column * BUCKET_COLUMN_STRIDE;
+		for (let row = lowestRow; row <= highestRow; row += 1) {
+			for (const previous of index.wireBuckets.get(columnKey + row) ?? []) {
+				if (previous.seen === query) continue;
+				previous.seen = query;
+				if (Math.min(previous.start.y, previous.end.y) > highestY) continue;
+				if (Math.max(previous.start.y, previous.end.y) < lowestY) continue;
+				if (netId !== undefined && previous.netId === netId) continue;
+				const contact = segmentContact(candidate, previous);
+				if (contact !== undefined) {
+					cost += contact.strict && !contact.overlap && previous.orthogonal
+						? ROUTER_CROSSING_PENALTY
+						: ROUTER_CHANNEL_REUSE_PENALTY;
+				}
 			}
 		}
 	}
@@ -1531,12 +1587,17 @@ function indexCompletedRoute(
 	const segments = traceSegments(route, routeIndex, index.nextWireKey, connection.netId);
 	index.nextWireKey += segments.length;
 	for (const segment of segments) {
-		const minimum = Math.floor(Math.min(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE);
-		const maximum = Math.floor(Math.max(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE);
-		for (let bucket = minimum; bucket <= maximum; bucket += 1) {
-			const entries = index.wireBuckets.get(bucket) ?? [];
-			entries.push(segment);
-			index.wireBuckets.set(bucket, entries);
+		const lowestColumn = Math.floor(Math.min(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE);
+		const highestColumn = Math.floor(Math.max(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE);
+		const lowestRow = Math.floor(Math.min(segment.start.y, segment.end.y) / CROSSING_BUCKET_SIZE);
+		const highestRow = Math.floor(Math.max(segment.start.y, segment.end.y) / CROSSING_BUCKET_SIZE);
+		for (let column = lowestColumn; column <= highestColumn; column += 1) {
+			const columnKey = column * BUCKET_COLUMN_STRIDE;
+			for (let row = lowestRow; row <= highestRow; row += 1) {
+				const entries = index.wireBuckets.get(columnKey + row) ?? [];
+				entries.push(segment);
+				index.wireBuckets.set(columnKey + row, entries);
+			}
 		}
 	}
 	const label = connectionLabelRectangle(connection, route);
@@ -1596,8 +1657,40 @@ class RouteHeap {
 	}
 }
 
-function uniqueSorted(values: readonly number[]): number[] {
-	return [...new Set(values)].sort((left, right) => left - right);
+/**
+ * Ascending, de-duplicated candidate coordinates for one axis.
+ *
+ * Every router candidate list was previously built as
+ * `[...new Set([a, b, ...bounds, ...obstacles.flatMap(...)])].sort()`, which
+ * allocated a two-element array per obstacle plus a spread copy of the lot,
+ * four routes deep, on the hottest path in the compiler. Adding straight to the
+ * set drops both and yields the identical sequence.
+ *
+ * The set still comes before the sort. Sorting first and collapsing runs
+ * afterwards looks leaner but is markedly slower on the documents that matter:
+ * a grid repeats the same few coordinates across every row, so de-duplicating
+ * early is what keeps the sort small.
+ */
+function laneCoordinates(
+	first: number,
+	second: number,
+	limit: number | undefined,
+	obstacles: readonly SchematicRectangle[],
+	vertical: boolean,
+	within?: (value: number) => boolean
+): number[] {
+	const values = new Set([first, second]);
+	if (limit !== undefined) {
+		values.add(0);
+		values.add(limit);
+	}
+	for (const obstacle of obstacles) {
+		const low = vertical ? obstacle.minY : obstacle.minX;
+		const high = vertical ? obstacle.maxY : obstacle.maxX;
+		if (within === undefined || within(low)) values.add(low);
+		if (within === undefined || within(high)) values.add(high);
+	}
+	return [...values].sort((left, right) => left - right);
 }
 
 /** Sparse compressed-grid A* used only when all one-channel candidates are blocked. */
@@ -1614,22 +1707,8 @@ function searchOrthogonalRoute(
 ): SchematicPoint[] | undefined {
 	const withinX = (value: number) => bounds === undefined || (value >= 0 && value <= bounds.width);
 	const withinY = (value: number) => bounds === undefined || (value >= 0 && value <= bounds.height);
-	/* v8 ignore next -- unbounded routing normally resolves in the one-channel fast path. */
-	const boundaryXs = bounds === undefined ? [] : [0, bounds.width];
-	/* v8 ignore next -- unbounded routing normally resolves in the one-channel fast path. */
-	const boundaryYs = bounds === undefined ? [] : [0, bounds.height];
-	const xs = uniqueSorted([
-		start.x,
-		end.x,
-		...boundaryXs,
-		...obstacles.flatMap((obstacle) => [obstacle.minX, obstacle.maxX]).filter(withinX)
-	]);
-	const ys = uniqueSorted([
-		start.y,
-		end.y,
-		...boundaryYs,
-		...obstacles.flatMap((obstacle) => [obstacle.minY, obstacle.maxY]).filter(withinY)
-	]);
+	const xs = laneCoordinates(start.x, end.x, bounds?.width, obstacles, false, withinX);
+	const ys = laneCoordinates(start.y, end.y, bounds?.height, obstacles, true, withinY);
 	const width = xs.length;
 	const startX = xs.indexOf(start.x);
 	const startY = ys.indexOf(start.y);
@@ -1758,23 +1837,13 @@ function routeBetweenEscapes(
 	 */
 	const spanX = Math.abs(end.x - start.x);
 	const spanY = Math.abs(end.y - start.y);
-	const yLanes = uniqueSorted([
-		start.y,
-		end.y,
-		...(bounds === undefined ? [] : [0, bounds.height]),
-		...obstacles.flatMap((obstacle) => [obstacle.minY, obstacle.maxY])
-	]);
+	const yLanes = laneCoordinates(start.y, end.y, bounds?.height, obstacles, true);
 	for (const y of yLanes) {
 		if (bounds !== undefined && (y < 0 || y > bounds.height)) continue;
 		if (Math.abs(y - start.y) + spanX + Math.abs(end.y - y) >= bestScore) continue;
 		consider([start, { x: start.x, y }, { x: end.x, y }, end]);
 	}
-	const xLanes = uniqueSorted([
-		start.x,
-		end.x,
-		...(bounds === undefined ? [] : [0, bounds.width]),
-		...obstacles.flatMap((obstacle) => [obstacle.minX, obstacle.maxX])
-	]);
+	const xLanes = laneCoordinates(start.x, end.x, bounds?.width, obstacles, false);
 	for (const x of xLanes) {
 		if (bounds !== undefined && (x < 0 || x > bounds.width)) continue;
 		if (Math.abs(x - start.x) + spanY + Math.abs(end.x - x) >= bestScore) continue;

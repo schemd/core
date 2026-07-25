@@ -6,7 +6,7 @@
 
 `schemd`—pronounced like “skemd” (`/skɛmd/`)—is a strict, deterministic text-to-SVG compiler for electrical, digital, quantum, and UML diagrams. It has zero runtime dependencies and does not use a DOM, Canvas, browser layout, external fonts, raster assets, or `getBBox()`.
 
-Version 0.3.4 requires Node.js 24 or newer.
+Version 0.3.5 requires Node.js 24 or newer.
 
 Two size budgets are enforced on every release. Tree-shaken to `compileSchematic` — what a host that only compiles actually ships — the bundle stays below 31 KiB gzip. The whole public entry with nothing shaken away, which is what registry size tools report, stays below 34 KiB gzip.
 
@@ -136,7 +136,11 @@ DEPLOY.top -> FW.bottom #cyan [control-flow]
 A compiled diagram is not only a picture. The parser already resolves net topology and the layout pass already enumerates ports, so the same source can be inspected: what is connected to what, and which of those connections are mistakes.
 
 ```ts
-import { inspectSchematic, parseSchematic, parseSchematicFence } from "@schemd/core";
+import {
+  inspectSchematic,
+  parseSchematic,
+  parseSchematicFence,
+} from "@schemd/core";
 
 const fence = parseSchematicFence('schemd bounds="900x400" title="Supply"')!;
 const document = parseSchematic(
@@ -156,17 +160,17 @@ const { netlist, diagnostics } = inspectSchematic(document);
 
 `buildNetlist` returns the model — nodes with their stable ports, nets with their terminals, domains, widths, and source lines, and one edge per declared connection. `verifyNetlist` runs the rules over that model, and `inspectSchematic` does both.
 
-| Code                      | Severity  | Fails when                                                        |
-| ------------------------- | --------- | ----------------------------------------------------------------- |
+| Code                      | Severity  | Fails when                                                                       |
+| ------------------------- | --------- | -------------------------------------------------------------------------------- |
 | `shorted-supply`          | `error`   | Two supply rails — a source positive, a power rail, or a ground — share one net. |
-| `width-mismatch`          | `error`   | One net carries connections declaring different bus widths.        |
-| `domain-mismatch`         | `error`   | One net mixes signal domains, such as quantum and digital.         |
-| `unconnected-component`   | `warning` | A declared component takes part in no connection.                  |
-| `duplicate-connection`    | `warning` | The same pair of terminals is connected more than once.            |
-| `multiple-drivers`        | `warning` | Two digital outputs drive the same net.                            |
-| `disconnected-subcircuit` | `info`    | The diagram contains more than one independent connected group.    |
+| `width-mismatch`          | `error`   | One net carries connections declaring different bus widths.                      |
+| `domain-mismatch`         | `error`   | One net mixes signal domains, such as quantum and digital.                       |
+| `unconnected-component`   | `warning` | A declared component takes part in no connection.                                |
+| `duplicate-connection`    | `warning` | The same pair of terminals is connected more than once.                          |
+| `multiple-drivers`        | `warning` | Two digital outputs drive the same net.                                          |
+| `disconnected-subcircuit` | `info`    | The diagram contains more than one independent connected group.                  |
 
-Rules are deliberately narrow. A source's `negative` terminal sharing a node with ground is the return path of almost every circuit ever drawn, so only two *rails* on one net short; two analog terminals sharing a node is ordinary topology, so contention is reported for digital domains only. `SCHEMATIC_RULES` publishes each code with its severity and summary, and diagnostics arrive ordered by severity, then source line, then code — stable enough to assert against in a test or print in a CI log.
+Rules are deliberately narrow. A source's `negative` terminal sharing a node with ground is the return path of almost every circuit ever drawn, so only two _rails_ on one net short; two analog terminals sharing a node is ordinary topology, so contention is reported for digital domains only. `SCHEMATIC_RULES` publishes each code with its severity and summary, and diagnostics arrive ordered by severity, then source line, then code — stable enough to assert against in a test or print in a CI log.
 
 ## Output modes
 
@@ -184,4 +188,4 @@ Omitting `orientation` is byte-identical to the explicit legacy default `orienta
 
 After `bun install`, run `bun run test:visual:install` once to provision Chromium, then `bun run release:check` for type checking, 100% code coverage, bounded deterministic fuzzing, a 100%-kill targeted mutation gate, pixel goldens, build, gzip budget, and latency regression ceilings.
 
-[Official versioned documentation](https://schemd.johnowolabiidogun.dev/docs/0.3.0/overview) · [Changelog](./CHANGELOG.md) · [Roadmap](./ROADMAP.md) · [Issues](https://github.com/schemd/core/issues) · [MIT](./LICENSE)
+[Official versioned documentation](https://schemd.johnowolabiidogun.dev/docs/0.3/overview) · [Changelog](./CHANGELOG.md) · [Roadmap](./ROADMAP.md) · [Issues](https://github.com/schemd/core/issues) · [MIT](./LICENSE)
