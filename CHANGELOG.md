@@ -2,6 +2,18 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
+## [0.3.6] - Unreleased
+
+### Added
+
+- Diagrams can describe themselves. `describeSchematic` and `describeNetlist` derive a deterministic account of a document from its connectivity — scale and signal domain in one sentence fit for an `alt` attribute, an inventory grouped by kind, and one sentence per net naming the terminals it ties. Labels are flattened through the same `mathLabelText` the renderer uses, so `V_{in}` is spoken as `Vin` and `1 k\Omega` as `1 kΩ`. The description states only what the netlist proves: it does not name circuit archetypes, because recognising an intent the source never declared produces a confident wrong label, which is worse for a screen-reader user than an accurate structural one.
+- The module is reachable as `@schemd/core/describe` and is deliberately absent from the package entry, so neither size budget moves and a host that only compiles carries no prose generation.
+
+### Verified
+
+- Description output is covered to the project's 100% statement, branch, function, and line thresholds, including documents that declare nothing, a single component, labels that only repeat their identifier, and nouns whose plural is irregular.
+- Both size budgets are unmoved from 0.3.5, because the entry point does not reach the new module.
+
 ## [0.3.5] - 07/25/2026
 
 ### Changed

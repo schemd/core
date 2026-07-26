@@ -6,7 +6,7 @@
 
 `schemd`—pronounced like “skemd” (`/skɛmd/`)—is a strict, deterministic text-to-SVG compiler for electrical, digital, quantum, and UML diagrams. It has zero runtime dependencies and does not use a DOM, Canvas, browser layout, external fonts, raster assets, or `getBBox()`.
 
-Version 0.3.5 requires Node.js 24 or newer.
+Version 0.3.6 requires Node.js 24 or newer.
 
 Two size budgets are enforced on every release. Tree-shaken to `compileSchematic` — what a host that only compiles actually ships — the bundle stays below 31 KiB gzip. The whole public entry with nothing shaken away, which is what registry size tools report, stays below 34 KiB gzip.
 
