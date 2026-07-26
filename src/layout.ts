@@ -2927,7 +2927,9 @@ function validateComponentOverlaps(components: readonly SchematicComponent[]): v
 				!componentOverlapAllowed(previous, current)
 			) {
 				throw new SchematicSyntaxError(
-					`${current.component.id} overlaps ${previous.component.id}; move one component or use a UML container.`,
+					`${current.component.id} overlaps ${previous.component.id} ` +
+						`${separationAdvice(current.rectangle, previous.rectangle, current.component, current.component.id)}, ` +
+						`or use a UML container.`,
 					current.component.line
 				);
 			}
@@ -2936,6 +2938,54 @@ function validateComponentOverlaps(components: readonly SchematicComponent[]): v
 			(buckets[bucket] ??= []).push(current);
 		}
 	}
+}
+
+/**
+ * How to separate two overlapping bodies, in the author's own coordinates.
+ *
+ * A diagnostic that says "move one component" makes the author guess, re-run,
+ * and guess again — the compiler already knows the exact overlap and a move
+ * that resolves it, so it should say so. The coordinate given is the
+ * `at (x, y)` origin they actually type, not the derived body rectangle.
+ *
+ * The advice follows the axis the author already used to separate the pair,
+ * not the mathematically shortest escape: two parts side by side overlap 44
+ * units horizontally and 36 vertically, and telling someone to drop the second
+ * one below the first because it is 8 units cheaper ignores what they drew.
+ *
+ * @param moving - Body of the component named in the advice.
+ * @param fixed - Body it collides with.
+ * @param origin - Declared origin of the moving component.
+ * @param id - Identifier of the moving component.
+ * @returns A clause such as `by 12 units horizontally; move R1 to x >= 412`.
+ */
+function separationAdvice(
+	moving: SchematicRectangle,
+	fixed: SchematicRectangle,
+	origin: { readonly x: number; readonly y: number },
+	id: string
+): string {
+	const offsetX = (moving.minX + moving.maxX) / 2 - (fixed.minX + fixed.maxX) / 2;
+	const offsetY = (moving.minY + moving.maxY) / 2 - (fixed.minY + fixed.maxY) / 2;
+	const horizontal = Math.abs(offsetX) >= Math.abs(offsetY);
+	/* Keep the pair in the order the author placed them: a body already to the
+	   right moves further right, never out through its neighbour. */
+	const shift = horizontal
+		? offsetX >= 0
+			? fixed.maxX - moving.minX
+			: fixed.minX - moving.maxX
+		: offsetY >= 0
+			? fixed.maxY - moving.minY
+			: fixed.minY - moving.maxY;
+	const overlap = horizontal
+		? Math.min(moving.maxX, fixed.maxX) - Math.max(moving.minX, fixed.minX)
+		: Math.min(moving.maxY, fixed.maxY) - Math.max(moving.minY, fixed.minY);
+	const amount = Math.round(overlap);
+	const target = Math.round((horizontal ? origin.x : origin.y) + shift);
+	return (
+		`by ${amount} unit${amount === 1 ? '' : 's'} ${horizontal ? 'horizontally' : 'vertically'}; ` +
+		`move ${id} to ${horizontal ? 'x' : 'y'} ${shift > 0 ? '>=' : '<='} ${target}`
+	);
 }
 
 /**
@@ -2955,9 +3005,37 @@ export function validateDocumentGeometry(
 ): readonly RoutedConnection[] {
 	validateComponentOverlaps(document.components);
 	for (const component of document.components) {
-		if (!rectangleInsideBounds(componentRectangle(component), fence.bounds)) {
+		const extent = componentRectangle(component);
+		if (!rectangleInsideBounds(extent, fence.bounds)) {
+			/*
+			 * The origin already passed the lexical check, so what escaped is the
+			 * drawn body, its stubs or its labels — none of which the author
+			 * positioned directly. Report the overhang and the origin that would
+			 * contain it.
+			 */
+			const overhang: string[] = [];
+			if (extent.minX < 0) {
+				overhang.push(
+					`extends ${Math.round(-extent.minX)} left of x=0; move ${component.id} to x >= ${Math.round(component.x - extent.minX)}`
+				);
+			}
+			if (extent.maxX > fence.bounds.width) {
+				overhang.push(
+					`extends ${Math.round(extent.maxX - fence.bounds.width)} past x=${fence.bounds.width}; move ${component.id} to x <= ${Math.round(component.x - (extent.maxX - fence.bounds.width))}`
+				);
+			}
+			if (extent.minY < 0) {
+				overhang.push(
+					`extends ${Math.round(-extent.minY)} above y=0; move ${component.id} to y >= ${Math.round(component.y - extent.minY)}`
+				);
+			}
+			if (extent.maxY > fence.bounds.height) {
+				overhang.push(
+					`extends ${Math.round(extent.maxY - fence.bounds.height)} past y=${fence.bounds.height}; move ${component.id} to y <= ${Math.round(component.y - (extent.maxY - fence.bounds.height))}`
+				);
+			}
 			throw new SchematicSyntaxError(
-				`${component.id} geometry exceeds the declared ${fence.bounds.width}x${fence.bounds.height} bounds.`,
+				`${component.id} geometry exceeds the declared ${fence.bounds.width}x${fence.bounds.height} bounds: ${overhang.join(', and ')}. Widen the fence bounds if the diagram needs the room.`,
 				component.line
 			);
 		}

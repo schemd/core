@@ -6,7 +6,7 @@
 
 `schemd`—pronounced like “skemd” (`/skɛmd/`)—is a strict, deterministic text-to-SVG compiler for electrical, digital, quantum, and UML diagrams. It has zero runtime dependencies and does not use a DOM, Canvas, browser layout, external fonts, raster assets, or `getBBox()`.
 
-Version 0.3.7 requires Node.js 24 or newer.
+Version 0.3.8 requires Node.js 24 or newer.
 
 Two size budgets are enforced on every release. Tree-shaken to `compileSchematic` — what a host that only compiles actually ships — the bundle stays below 31 KiB gzip. The whole public entry with nothing shaken away, which is what registry size tools report, stays below 34 KiB gzip.
 
@@ -179,6 +179,18 @@ Rules are deliberately narrow. A source's `negative` terminal sharing a node wit
 - `full`: node, port, wire, source-line, and topology metadata for delegated interaction.
 
 All modes are deterministic and use diagram-local IDs. Hosts should use a unique `idPrefix` when more than one generated SVG can share a document.
+
+## Limitations and operational risks
+
+Read this before treating a clean compile as an engineering result.
+
+- **`verifyNetlist` is structural linting, not verification.** It runs deterministic design rules over a flat connectivity model. It cannot establish analog correctness, timing, impedance, drive strength, metastability, quantum validity, or functional behaviour. A clean result means no rule fired — not that a circuit is correct or safe. The name is older than that distinction and is kept for compatibility.
+- **Routing is deterministic but bounded.** A one-channel fast path falls back to a sparse compressed-grid A\*, and both are heuristics with limits. Dense but valid arrangements can still be rejected, and conservative body, label, marker, and occupancy rules refuse some diagrams that would have looked fine. Rejections are line-accurate and now suggest a coordinate that resolves them, but the compiler will not move a component you placed.
+- **The model is flat and capped.** 512 components, 2,048 connections, no hierarchy, no sub-sheets, no behavioural simulation, no timing analysis, no analog solving, and no standards certification. This suits documentation, teaching, and modest schematics — not large engineering designs.
+- **Descriptions report connectivity, not intent.** `@schemd/core/describe` states what the netlist proves and deliberately names no circuit archetypes. `headline` is one sentence and is what belongs in an `alt` attribute; `text` includes one sentence per net and can become long, so expose it as a separate long description rather than pasting it wholesale.
+- **Legacy CNOT spellings address different things.** `control` and `target` name gate-marker positions; `in1`/`out1` and `in2`/`out2` are the composable rails. Both are accepted, and mixing the two models produces valid syntax with a topology you did not intend.
+- **Coverage numbers describe the source, not the package.** 100% statement, branch, function, and line coverage, a seven-mutant kill gate, and four Chromium goldens all exercise the implementation. They said nothing about whether the published tarball could be imported: `@schemd/core/netlist` was unusable from 0.3.4 through 0.3.6 and `@schemd/core/describe` in 0.3.6, because no test crossed the installed-package boundary. A packaging test now does. **Consumers of those releases should upgrade to 0.3.7 or later.**
+- **Published performance figures are narrow.** Warm medians on one Apple Silicon / Node configuration. There are no published cold-start, memory, pathological-input, browser-runtime, or multi-platform results. Run `bun run benchmark` on your own hardware.
 
 ## Compatibility
 

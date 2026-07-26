@@ -2,6 +2,22 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
+## [0.3.8] - 07/26/2026
+
+### Changed
+
+- Geometry diagnostics say how to fix the diagram, not only what is wrong with it. An overlap now reports the amount and a coordinate that clears it — `R2 overlaps R1 by 44 units horizontally; move R2 to x >= 284, or use a UML container` — expressed in the `at (x, y)` origin the author types rather than the derived body rectangle. The advice follows the axis the author already used to separate the pair, so two parts side by side move apart sideways instead of being stacked because that happened to be eight units cheaper.
+- Out-of-bounds diagnostics name the offending coordinate and the range it must fall in. A body that escapes the canvas after layout reports the overhang and an origin that would contain it, and notes that widening the fence is also an answer.
+
+### Documented
+
+- The README carries a standing statement of limitations and operational risks. `verifyNetlist` performs structural linting over a flat connectivity model — not electrical, timing, analog, or functional verification — and a clean result does not mean a circuit is correct. Routing is deterministic but bounded. The model is flat and capped at 512 components. Coverage percentages describe the exercised source, not the published package or every runtime.
+- The 0.3.4 and 0.3.6 entries below are corrected in place: both announced a subpath the package export map did not expose, and the claim stood for three releases.
+
+### Verified
+
+- Every geometry diagnostic is asserted twice: once for the text it produces, and once by applying its own advice to the rejected document and compiling the result. Advice that fails to resolve the error fails the suite.
+
 ## [0.3.7] - 07/25/2026
 
 ### Fixed
@@ -17,7 +33,7 @@ All notable changes to `@schemd/core` are recorded here. Dates describe actual n
 ### Added
 
 - Diagrams can describe themselves. `describeSchematic` and `describeNetlist` derive a deterministic account of a document from its connectivity — scale and signal domain in one sentence fit for an `alt` attribute, an inventory grouped by kind, and one sentence per net naming the terminals it ties. Labels are flattened through the same `mathLabelText` the renderer uses, so `V_{in}` is spoken as `Vin` and `1 k\Omega` as `1 kΩ`. The description states only what the netlist proves: it does not name circuit archetypes, because recognising an intent the source never declared produces a confident wrong label, which is worse for a screen-reader user than an accurate structural one.
-- The module is reachable as `@schemd/core/describe` and is deliberately absent from the package entry, so neither size budget moves and a host that only compiles carries no prose generation.
+- The module is deliberately absent from the package entry, so neither size budget moves and a host that only compiles carries no prose generation. **Correction (0.3.7):** the module was intended to be reachable as `@schemd/core/describe`, but the required package export was missing until 0.3.7. Consumers of 0.3.6 cannot import that subpath.
 
 ### Verified
 
@@ -42,7 +58,7 @@ All notable changes to `@schemd/core` are recorded here. Dates describe actual n
 ### Added
 
 - Connectivity is now a first-class artifact. `buildNetlist` returns the nodes, nets, and edges behind a validated document, `verifyNetlist` runs deterministic design rules over that model, and `inspectSchematic` does both in one call. Seven rules ship: shorted supply rails, conflicting bus widths, mixed signal domains, unconnected components, duplicate connections, contended digital drivers, and disconnected subcircuits. Diagnostics carry a stable code, a severity, the subjects involved, and the source line wherever a declaration owns the fault.
-- `SCHEMATIC_RULES` publishes the rule catalogue — code, severity, and summary — so hosts can document or filter checks without hard-coding strings. The module is also reachable as the `@schemd/core/netlist` subpath export.
+- `SCHEMATIC_RULES` publishes the rule catalogue — code, severity, and summary — so hosts can document or filter checks without hard-coding strings. **Correction (0.3.7):** the module was intended to be reachable as `@schemd/core/netlist`, but the required package export was missing until 0.3.7. Consumers of 0.3.4 through 0.3.6 cannot import that subpath.
 
 ### Changed
 

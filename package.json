@@ -1,6 +1,6 @@
 {
   "name": "@schemd/core",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Zero-dependency text-to-SVG compiler for schematics and UML.",
   "homepage": "https://schemd.johnowolabiidogun.dev",
   "bugs": {

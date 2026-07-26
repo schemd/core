@@ -1326,14 +1326,19 @@ function parseConnection(match: RegExpMatchArray, line: number): SchematicConnec
  * @param fence - Declared canvas contract.
  */
 function validateComponent(component: SchematicComponent, fence: SchematicFence): void {
-	if (
-		component.x < 0 ||
-		component.x > fence.bounds.width ||
-		component.y < 0 ||
-		component.y > fence.bounds.height
-	) {
+	/* Name the coordinate that is wrong and the range it must fall in: "outside
+	   the declared bounds" leaves the author to work out which of x and y
+	   offended, and by how much. */
+	const offences: string[] = [];
+	if (component.x < 0 || component.x > fence.bounds.width) {
+		offences.push(`x is ${component.x}, and must be between 0 and ${fence.bounds.width}`);
+	}
+	if (component.y < 0 || component.y > fence.bounds.height) {
+		offences.push(`y is ${component.y}, and must be between 0 and ${fence.bounds.height}`);
+	}
+	if (offences.length > 0) {
 		throw new SchematicSyntaxError(
-			`${component.id} is outside the declared ${fence.bounds.width}x${fence.bounds.height} bounds.`,
+			`${component.id} is outside the declared ${fence.bounds.width}x${fence.bounds.height} bounds: ${offences.join('; ')}.`,
 			component.line
 		);
 	}

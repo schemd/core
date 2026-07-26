@@ -280,12 +280,19 @@ function connectedGroups(netlist: SchematicNetlist): number {
 /**
  * Run every design rule over a netlist.
  *
+ * This is **structural linting, not verification.** The rules read a flat
+ * connectivity model and nothing else: they cannot establish analog
+ * correctness, timing, impedance, drive strength, metastability, quantum
+ * validity, or functional behaviour. An empty result means no rule fired — it
+ * is not evidence that a circuit works, and it must not be presented as one.
+ * The name predates that distinction and is kept for compatibility.
+ *
  * Diagnostics are ordered by severity — errors, then warnings, then information
  * — and by source line within a severity, so output is stable enough to assert
  * against in a test or print in a CI log.
  *
  * @param netlist - Model returned by {@link buildNetlist}.
- * @returns Deterministically ordered rule violations; empty means clean.
+ * @returns Deterministically ordered rule violations; empty means no rule fired.
  */
 export function verifyNetlist(netlist: SchematicNetlist): readonly SchematicDiagnostic[] {
 	const diagnostics: SchematicDiagnostic[] = [];
