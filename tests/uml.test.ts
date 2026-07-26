@@ -99,7 +99,7 @@ A.right -> B.left #slate [aggregation]
 A.right -> B.left #slate [composition]
 A.right -> B.left #slate [include]
 A.right -> B.left #slate [extend]
-A.right -> A.right #slate [dashed label="self"]`,
+A.top -> B.top #slate [dashed label="peer"]`,
 			fence
 		);
 		expect(relationDocument.connections).toMatchObject([
@@ -109,7 +109,7 @@ A.right -> A.right #slate [dashed label="self"]`,
 			{ relation: 'composition', markerStart: 'diamond-filled', dashed: false },
 			{ relation: 'include', label: '«include»', dashed: true },
 			{ relation: 'extend', label: '«extend»', dashed: true },
-			{ relation: 'signal', label: 'self', dashed: true }
+			{ relation: 'signal', label: 'peer', dashed: true }
 		]);
 		const html = renderSchematic(relationDocument, fence);
 		expect(html).toContain('marker-diamond');
@@ -117,7 +117,7 @@ A.right -> A.right #slate [dashed label="self"]`,
 		expect(html).toContain('refX="12"');
 		expect(html).toContain('stroke-dasharray="7 5"');
 		expect(html).toContain('>calls</text>');
-		expect(html).toContain('>self</text>');
+		expect(html).toContain('>peer</text>');
 	});
 
 	test('rejects malformed and unbounded UML fields without hanging', () => {

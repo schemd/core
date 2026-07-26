@@ -69,6 +69,7 @@ import {
 	type UmlStateComponent
 } from './types.js';
 import {
+	canonicalPortName,
 	isClassicalGate,
 	isDigitalComponent,
 	isQuantumSpecial,
@@ -1556,6 +1557,43 @@ function validateEndpoint(
 	}
 }
 
+/**
+ * Rewrite both endpoints to the canonical terminal each one addresses.
+ *
+ * `SchematicEndpoint.port` is documented as canonical, and every consumer —
+ * topology resolution, contact validation, the netlist, the source map — keys
+ * on it. Normalizing once here is what makes `R1.out` and `R1.r` one terminal
+ * everywhere instead of two that happen to be drawn on top of each other.
+ *
+ * @param connection - Connection whose endpoints already passed validation.
+ * @param components - Document-local components keyed by unique ID.
+ * @throws {SchematicSyntaxError} When both endpoints reach the same terminal.
+ */
+function canonicalizeConnectionPorts(
+	connection: SchematicConnection,
+	components: ReadonlyMap<string, SchematicComponent>
+): void {
+	connection.from.port = canonicalPortName(
+		components.get(connection.from.componentId)!,
+		connection.from.port
+	);
+	connection.to.port = canonicalPortName(
+		components.get(connection.to.componentId)!,
+		connection.to.port
+	);
+	if (
+		connection.from.componentId === connection.to.componentId &&
+		connection.from.port === connection.to.port
+	) {
+		/* A terminal wired to itself routes to a zero-length trace that paints
+		   nothing, so name the terminal rather than emit an invisible wire. */
+		throw new SchematicSyntaxError(
+			`${connection.from.componentId}.${connection.from.port} cannot connect to itself; a connection needs two distinct terminals.`,
+			connection.line
+		);
+	}
+}
+
 /** Return the exact scalar/bus width exposed by one validated endpoint. */
 function endpointWidth(
 	endpoint: SchematicEndpoint,
@@ -1819,6 +1857,7 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 	for (const connection of connections) {
 		validateEndpoint(connection.from, componentsById, connection.line);
 		validateEndpoint(connection.to, componentsById, connection.line);
+		canonicalizeConnectionPorts(connection, componentsById);
 		validateConnectionWidth(connection, componentsById);
 	}
 	assignConnectionNetIds(connections);

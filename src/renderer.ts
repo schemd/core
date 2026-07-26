@@ -593,37 +593,41 @@ function icPinMarkup(
 	paint: string
 ): string {
 	const pins = component.pins[side];
+	const halfWidth = component.bodyWidth / 2;
+	const halfHeight = component.bodyHeight / 2;
+	const sign = side === 'left' || side === 'top' ? -1 : 1;
+	/*
+	 * The side is resolved once, outside the loop. Deriving it per pin measured
+	 * every label twice — once for a horizontal fit and once for a vertical one —
+	 * and threw one of the two away, doubling the micro-math parse for the
+	 * densest text in the document.
+	 */
+	if (side === 'left' || side === 'right') {
+		const stubX = svgNumber(sign * (halfWidth + 16));
+		const bodyX = svgNumber(sign * halfWidth);
+		const head = side === 'left' ? stubX : bodyX;
+		const tail = side === 'left' ? bodyX : stubX;
+		const labelX = svgNumber(sign * (halfWidth - 5));
+		const anchor = side === 'left' ? 'start' : 'end';
+		const fitted = Math.max(8, halfWidth - 10);
+		return pins
+			.map((pin, index) => {
+				const y = distributedCoordinate(index, pins.length, component.bodyHeight);
+				return `<path ${paint} d="M ${head} ${svgNumber(y)} H ${tail}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${labelX}" y="${svgNumber(y + 3)}" text-anchor="${anchor}" font-size="10" textLength="${fittedTextLength(pin, fitted, 4)}" ${LENGTH_FIT}>${escapeXml(pin)}</text>`;
+			})
+			.join('');
+	}
+	const stubY = svgNumber(sign * (halfHeight + 16));
+	const bodyY = svgNumber(sign * halfHeight);
+	const head = side === 'top' ? stubY : bodyY;
+	const tail = side === 'top' ? bodyY : stubY;
+	const labelY = svgNumber(sign * (halfHeight - 5));
+	const turn = side === 'top' ? 90 : -90;
+	const fitted = Math.max(8, halfHeight - 10);
 	return pins
 		.map((pin, index) => {
-			const vertical = side === 'left' || side === 'right';
-			const x = vertical
-				? (side === 'left' ? -1 : 1) * (component.bodyWidth / 2 + 16)
-				: distributedCoordinate(index, pins.length, component.bodyWidth);
-			const y = vertical
-				? distributedCoordinate(index, pins.length, component.bodyHeight)
-				: (side === 'top' ? -1 : 1) * (component.bodyHeight / 2 + 16);
-			const horizontalTextLength = fittedTextLength(
-				pin,
-				Math.max(8, component.bodyWidth / 2 - 10),
-				4
-			);
-			const verticalTextLength = fittedTextLength(
-				pin,
-				Math.max(8, component.bodyHeight / 2 - 10),
-				4
-			);
-			if (side === 'left') {
-				return `<path ${paint} d="M ${x} ${y} H ${-component.bodyWidth / 2}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${-component.bodyWidth / 2 + 5}" y="${y + 3}" text-anchor="start" font-size="10" textLength="${horizontalTextLength}" ${LENGTH_FIT}>${escapeXml(pin)}</text>`;
-			}
-			if (side === 'right') {
-				return `<path ${paint} d="M ${component.bodyWidth / 2} ${y} H ${x}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${component.bodyWidth / 2 - 5}" y="${y + 3}" text-anchor="end" font-size="10" textLength="${horizontalTextLength}" ${LENGTH_FIT}>${escapeXml(pin)}</text>`;
-			}
-			if (side === 'top') {
-				const labelY = -component.bodyHeight / 2 + 5;
-				return `<path ${paint} d="M ${x} ${y} V ${-component.bodyHeight / 2}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${x}" y="${labelY}" text-anchor="start" font-size="10" textLength="${verticalTextLength}" ${LENGTH_FIT} transform="rotate(90 ${x} ${labelY})">${escapeXml(pin)}</text>`;
-			}
-			const labelY = component.bodyHeight / 2 - 5;
-			return `<path ${paint} d="M ${x} ${component.bodyHeight / 2} V ${y}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${x}" y="${labelY}" text-anchor="start" font-size="10" textLength="${verticalTextLength}" ${LENGTH_FIT} transform="rotate(-90 ${x} ${labelY})">${escapeXml(pin)}</text>`;
+			const x = svgNumber(distributedCoordinate(index, pins.length, component.bodyWidth));
+			return `<path ${paint} d="M ${x} ${head} V ${tail}" /><text class="schematic-pin-label" ${TEXT_PAINT} x="${x}" y="${labelY}" text-anchor="start" font-size="10" textLength="${fittedTextLength(pin, fitted, 4)}" ${LENGTH_FIT} transform="rotate(${turn} ${x} ${labelY})">${escapeXml(pin)}</text>`;
 		})
 		.join('');
 }
@@ -636,11 +640,9 @@ function icPinMarkup(
  * @returns Complete local-coordinate chip markup.
  */
 function integratedCircuitShape(component: IntegratedCircuitComponent, paint: string): string {
-	const left = -component.bodyWidth / 2;
-	const top = -component.bodyHeight / 2;
 	const rotation = componentRotation(component);
 	const label = `<text class="schematic-gate-symbol" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="12" textLength="${fittedTextLength(component.label, component.bodyWidth - 12, 7)}" ${LENGTH_FIT}>${renderMathLabelTspans(component.label)}</text>`;
-	return `<rect ${paint} x="${left}" y="${top}" width="${component.bodyWidth}" height="${component.bodyHeight}" rx="3" />${icPinMarkup(component, 'left', paint)}${icPinMarkup(component, 'right', paint)}${icPinMarkup(component, 'top', paint)}${icPinMarkup(component, 'bottom', paint)}${rotation === 0 ? label : `<g transform="rotate(${-rotation})">${label}</g>`}`;
+	return `<rect ${paint} x="${svgNumber(-component.bodyWidth / 2)}" y="${svgNumber(-component.bodyHeight / 2)}" width="${svgNumber(component.bodyWidth)}" height="${svgNumber(component.bodyHeight)}" rx="3" />${icPinMarkup(component, 'left', paint)}${icPinMarkup(component, 'right', paint)}${icPinMarkup(component, 'top', paint)}${icPinMarkup(component, 'bottom', paint)}${rotation === 0 ? label : `<g transform="rotate(${-rotation})">${label}</g>`}`;
 }
 
 /** Serialize one left-aligned UML compartment row. */
@@ -1075,6 +1077,7 @@ function isOpenMarker(marker: SchematicSignalMarker): boolean {
 	return marker === 'open-arrow' || marker === 'triangle' || marker === 'diamond';
 }
 
+
 function connectionMarkerAttributes(
 	connection: SchematicConnection,
 	idPrefix: string,
@@ -1191,7 +1194,18 @@ function compactConnectionMarkup(
 	for (const [index, connection] of connections.entries()) {
 		const markerAttributes = connectionMarkerAttributes(connection, idPrefix, false);
 		const signalKind = connection.signalKind ?? 'electrical';
-		const key = `${colorKey(connection.color)}|${markerAttributes}|${signalKind}|${connection.width ?? 1}`;
+		/*
+		 * SVG paints marker-start at a path element's first vertex and marker-end
+		 * at its last, not once per subpath, so a compounded trace shows one
+		 * arrowhead however many wires it carries. `markerAttributes` names a
+		 * marker exactly when one rides on the visible trace — open markers travel
+		 * on their own carrier below and batch freely — so a connection that
+		 * claims those two slots batches with nothing. No colour key begins with
+		 * `#`, which keeps the two key spaces disjoint.
+		 */
+		const key = markerAttributes.includes('marker-')
+			? `#${index}`
+			: `${colorKey(connection.color)}|${markerAttributes}|${signalKind}|${connection.width ?? 1}`;
 		let batch = batches.get(key);
 		if (batch === undefined) {
 			batch = { color: connection.color, markerAttributes, signalKind, traces: [], endpoints: [], labels: [], carriers: [] };

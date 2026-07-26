@@ -79,9 +79,9 @@ interface AxisSegment {
 
 /** Straight span used by universal wire-contact validation. */
 interface TraceSegment {
-	readonly id: number;
 	readonly routeIndex: number;
-	readonly netId?: string;
+	/** Declaration this span belongs to, so cost and validation share one rule. */
+	readonly connection: SchematicConnection;
 	seen: number;
 	readonly start: SchematicPoint;
 	readonly end: SchematicPoint;
@@ -234,8 +234,8 @@ const MAX_ROUTER_STATES = 40_000;
 const ROUTER_BEND_PENALTY = 0.25;
 /** Discourage bridge crossings while permitting them when they shorten a route materially. */
 const ROUTER_CROSSING_PENALTY = 8;
-/** Make reusing an unrelated wire channel more expensive than any bounded canvas detour. */
-const ROUTER_CHANNEL_REUSE_PENALTY = 16_384;
+/** Lateral offset of the lane a route may take beside an occupied wire channel. */
+const ROUTER_CHANNEL_PITCH = 12;
 /** Spatial-hash cell size used to bound wire-crossing comparisons. */
 const CROSSING_BUCKET_SIZE = 64;
 /**
@@ -1027,6 +1027,58 @@ export function enumerateComponentPorts(component: SchematicComponent): readonly
 	}
 }
 
+/** Canonical port table per component, built once and retained with the AST. */
+const canonicalPorts = new WeakMap<SchematicComponent, Map<string, string>>();
+
+/** Identity of one terminal position; ids never contain the separator. */
+function terminalPointKey(point: SchematicPoint): string {
+	return `${point.x}|${point.y}`;
+}
+
+/**
+ * Map every accepted spelling of a component's terminals to its canonical id.
+ *
+ * The table holds each canonical id twice — under its own name, so an already
+ * canonical port costs one lookup and never resolves geometry, and under its
+ * resolved position, so an alias finds it. Where two distinct pins are drawn at
+ * one point (a flip-flop's preset and clear) the first enumerated id wins the
+ * position, and the self-mapping above still keeps the second one intact.
+ */
+function canonicalPortTable(component: SchematicComponent): ReadonlyMap<string, string> {
+	const cached = canonicalPorts.get(component);
+	if (cached !== undefined) return cached;
+	const table = new Map<string, string>();
+	for (const port of enumerateComponentPorts(component)) {
+		table.set(port.id, port.id);
+		const key = terminalPointKey(port.point);
+		if (!table.has(key)) table.set(key, port.id);
+	}
+	canonicalPorts.set(component, table);
+	return table;
+}
+
+/**
+ * Resolve one validated port name to the physical terminal it addresses.
+ *
+ * The DSL accepts several spellings for one pin — `out`, `right`, and `r` all
+ * name a passive's right lead — and all of them resolve through
+ * {@link resolvePortPoint} to the same coordinate. Keying topology on the
+ * author's spelling splits one node into several; keying it on the terminal the
+ * spelling reaches cannot, because two names denote one pin exactly when they
+ * land on it.
+ *
+ * @param component - Component owning the previously validated terminal.
+ * @param port - Canonical name or any supported alias.
+ * @returns The canonical terminal id, or `port` unchanged when it addresses a
+ *   position no enumerated terminal occupies.
+ */
+export function canonicalPortName(component: SchematicComponent, port: string): string {
+	const table = canonicalPortTable(component);
+	return (
+		table.get(port) ?? table.get(terminalPointKey(resolvePortPoint(component, port))) ?? port
+	);
+}
+
 /**
  * Resolve a connection endpoint through the document component index.
  *
@@ -1210,7 +1262,17 @@ interface RoutingIndex {
 	readonly rectangles: IndexedRoutingRectangle[];
 	readonly rectangleBuckets: Map<number, IndexedRoutingRectangle[]>;
 	readonly wireBuckets: Map<number, TraceSegment[]>;
-	nextWireKey: number;
+	/**
+	 * Constant coordinates of the vertical and horizontal spans already laid.
+	 *
+	 * Obstacle edges alone leave an empty canvas with three usable lanes however
+	 * much room it has, so a fourth trace had nowhere to go but on top of a
+	 * third. These let {@link laneCoordinates} offer a lane a pitch either side
+	 * of every occupied channel. They are sets, so a grid that repeats the same
+	 * few coordinates costs the same as a single wire.
+	 */
+	readonly verticalChannels: Set<number>;
+	readonly horizontalChannels: Set<number>;
 	rectangleQuery: number;
 	wireQuery: number;
 	/*
@@ -1267,12 +1329,72 @@ function componentLabelRectangles(component: SchematicComponent): readonly Schem
 	];
 }
 
-function createRoutingIndex(components: ReadonlyMap<string, SchematicComponent>): RoutingIndex {
+/** First point clear of a component's clearance ring along one terminal's normal. */
+function escapePoint(
+	geometry: { readonly point: SchematicPoint; readonly normal: SchematicPoint },
+	obstacle: SchematicRectangle
+): SchematicPoint {
+	return {
+		x:
+			geometry.normal.x < 0
+				? obstacle.minX
+				: geometry.normal.x > 0
+					? obstacle.maxX
+					: geometry.point.x,
+		y:
+			geometry.normal.y < 0
+				? obstacle.minY
+				: geometry.normal.y > 0
+					? obstacle.maxY
+					: geometry.point.y
+	};
+}
+
+/**
+ * Reserve the stub every orthogonal trace must occupy to reach its terminal.
+ *
+ * Routing is greedy and in source order, so without this an early wire is free
+ * to run the length of a row that a later wire has no choice but to land on —
+ * and the later wire is then unroutable through no fault of its own. Every
+ * approach corridor is known before any wire is placed, so claiming them up
+ * front costs one pass and removes the whole class of self-inflicted deadlock.
+ *
+ * Only orthogonal traces reserve. A line or Bézier leaves its terminal straight
+ * for the far endpoint rather than along the normal, so a corridor would reserve
+ * room it never uses.
+ */
+function seedTerminalApproaches(
+	index: RoutingIndex,
+	components: ReadonlyMap<string, SchematicComponent>,
+	connections: readonly SchematicConnection[]
+): void {
+	for (const [routeIndex, connection] of connections.entries()) {
+		if (connection.curve !== 'ortho') continue;
+		const segments = [connection.from, connection.to].map((endpoint) => {
+			const geometry = endpointGeometry(endpoint, components);
+			return {
+				routeIndex,
+				connection,
+				seen: 0,
+				start: geometry.point,
+				end: escapePoint(geometry, componentObstacleRectangle(geometry.component)),
+				orthogonal: true
+			} satisfies TraceSegment;
+		});
+		indexWireSegments(index, segments);
+	}
+}
+
+function createRoutingIndex(
+	components: ReadonlyMap<string, SchematicComponent>,
+	connections: readonly SchematicConnection[]
+): RoutingIndex {
 	const index: RoutingIndex = {
 		rectangles: [],
 		rectangleBuckets: new Map(),
 		wireBuckets: new Map(),
-		nextWireKey: 0,
+		verticalChannels: new Set(),
+		horizontalChannels: new Set(),
 		rectangleQuery: 0,
 		wireQuery: 0,
 		participationEpoch: 0,
@@ -1287,6 +1409,7 @@ function createRoutingIndex(components: ReadonlyMap<string, SchematicComponent>)
 			addRoutingRectangle(index, component.id, 'label', label);
 		}
 	}
+	seedTerminalApproaches(index, components, connections);
 	return index;
 }
 
@@ -1460,10 +1583,14 @@ function cubicIntersectsRectangle(
 	points: readonly [SchematicPoint, SchematicPoint, SchematicPoint, SchematicPoint],
 	rectangle: SchematicRectangle
 ): boolean {
-	const minX = Math.min(...points.map((point) => point.x));
-	const minY = Math.min(...points.map((point) => point.y));
-	const maxX = Math.max(...points.map((point) => point.x));
-	const maxY = Math.max(...points.map((point) => point.y));
+	/* Four mapped arrays and four spreads per call, on a function that halves the
+	   curve until its hull is a quarter of a unit across — the same four numbers,
+	   none of the garbage. */
+	const [a, b, c, d] = points;
+	const minX = Math.min(a.x, b.x, c.x, d.x);
+	const minY = Math.min(a.y, b.y, c.y, d.y);
+	const maxX = Math.max(a.x, b.x, c.x, d.x);
+	const maxY = Math.max(a.y, b.y, c.y, d.y);
 	if (
 		maxX <= rectangle.minX ||
 		minX >= rectangle.maxX ||
@@ -1477,7 +1604,6 @@ function cubicIntersectsRectangle(
 		x: (left.x + right.x) / 2,
 		y: (left.y + right.y) / 2
 	});
-	const [a, b, c, d] = points;
 	const ab = midpoint(a, b);
 	const bc = midpoint(b, c);
 	const cd = midpoint(c, d);
@@ -1526,19 +1652,31 @@ function candidateBends(points: readonly SchematicPoint[]): number {
 	return Math.max(0, points.length - 2);
 }
 
-/** Soft cost for crossing or reusing already-routed unrelated wire channels. */
+/**
+ * Cost of laying one orthogonal span across already-routed wires.
+ *
+ * A strict perpendicular crossing between two orthogonal traces earns an
+ * engineering bridge later, so it costs a soft penalty. Every other contact —
+ * a collinear overlap, a shared corner, a span that merely grazes another net —
+ * is what `routeConnections` rejects outright, so it costs infinity. Scoring
+ * those the same as a bridge is what let the router return a candidate it could
+ * already prove would be thrown out, instead of looking further.
+ *
+ * @param connection - Declaration being routed, used for the same net and
+ *   internal-fixture exemptions the contact validator applies.
+ * @returns Finite soft cost, or `Infinity` when the span cannot be validated.
+ */
 function wireSegmentCost(
 	index: RoutingIndex,
 	start: SchematicPoint,
 	end: SchematicPoint,
-	netId: string | undefined
+	connection: SchematicConnection
 ): number {
 	const minimum = Math.floor(Math.min(start.x, end.x) / CROSSING_BUCKET_SIZE);
 	const maximum = Math.floor(Math.max(start.x, end.x) / CROSSING_BUCKET_SIZE);
 	const lowestRow = Math.floor(Math.min(start.y, end.y) / CROSSING_BUCKET_SIZE);
 	const highestRow = Math.floor(Math.max(start.y, end.y) / CROSSING_BUCKET_SIZE);
 	const query = ++index.wireQuery;
-	const candidate: TraceSegment = { id: -1, routeIndex: -1, start, end, orthogonal: true, seen: 0 };
 	/* Same y-range false-positive removal validateUniversalWireContacts uses,
 	   with segmentContact's own tolerance so a grazing contact still counts. */
 	const lowestY = Math.min(start.y, end.y) - CONTACT_EPSILON;
@@ -1552,13 +1690,13 @@ function wireSegmentCost(
 				previous.seen = query;
 				if (Math.min(previous.start.y, previous.end.y) > highestY) continue;
 				if (Math.max(previous.start.y, previous.end.y) < lowestY) continue;
-				if (netId !== undefined && previous.netId === netId) continue;
-				const contact = segmentContact(candidate, previous);
-				if (contact !== undefined) {
-					cost += contact.strict && !contact.overlap && previous.orthogonal
-						? ROUTER_CROSSING_PENALTY
-						: ROUTER_CHANNEL_REUSE_PENALTY;
+				if (contactPermitted(connection, previous.connection)) continue;
+				const contact = segmentContact(start, end, previous);
+				if (contact === undefined) continue;
+				if (!contact.strict || contact.overlap || !previous.orthogonal) {
+					return Number.POSITIVE_INFINITY;
 				}
+				cost += ROUTER_CROSSING_PENALTY;
 			}
 		}
 	}
@@ -1568,25 +1706,21 @@ function wireSegmentCost(
 function routeOccupancyCost(
 	points: readonly SchematicPoint[],
 	index: RoutingIndex,
-	netId: string | undefined
+	connection: SchematicConnection
 ): number {
 	let cost = 0;
 	for (let pointIndex = 1; pointIndex < points.length; pointIndex += 1) {
-		cost += wireSegmentCost(index, points[pointIndex - 1]!, points[pointIndex]!, netId);
+		cost += wireSegmentCost(index, points[pointIndex - 1]!, points[pointIndex]!, connection);
+		if (cost === Number.POSITIVE_INFINITY) return cost;
 	}
 	return cost;
 }
 
-/** Add a completed route and its label to the index for later source-order routes. */
-function indexCompletedRoute(
-	index: RoutingIndex,
-	route: RoutedConnection,
-	connection: SchematicConnection,
-	routeIndex: number
-): void {
-	const segments = traceSegments(route, routeIndex, index.nextWireKey, connection.netId);
-	index.nextWireKey += segments.length;
+/** Hash occupied spans into the wire buckets and record the channels they claim. */
+function indexWireSegments(index: RoutingIndex, segments: readonly TraceSegment[]): void {
 	for (const segment of segments) {
+		if (segment.start.x === segment.end.x) index.verticalChannels.add(segment.start.x);
+		else if (segment.start.y === segment.end.y) index.horizontalChannels.add(segment.start.y);
 		const lowestColumn = Math.floor(Math.min(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE);
 		const highestColumn = Math.floor(Math.max(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE);
 		const lowestRow = Math.floor(Math.min(segment.start.y, segment.end.y) / CROSSING_BUCKET_SIZE);
@@ -1600,6 +1734,16 @@ function indexCompletedRoute(
 			}
 		}
 	}
+}
+
+/** Add a completed route and its label to the index for later source-order routes. */
+function indexCompletedRoute(
+	index: RoutingIndex,
+	route: RoutedConnection,
+	connection: SchematicConnection,
+	routeIndex: number
+): void {
+	indexWireSegments(index, traceSegments(route, routeIndex, connection));
 	const label = connectionLabelRectangle(connection, route);
 	if (label !== undefined) addRoutingRectangle(index, `wire-${routeIndex}`, 'label', label);
 }
@@ -1677,6 +1821,7 @@ function laneCoordinates(
 	limit: number | undefined,
 	obstacles: readonly SchematicRectangle[],
 	vertical: boolean,
+	channels: ReadonlySet<number>,
 	within?: (value: number) => boolean
 ): number[] {
 	const values = new Set([first, second]);
@@ -1684,11 +1829,26 @@ function laneCoordinates(
 		values.add(0);
 		values.add(limit);
 	}
+	const offer = (value: number): void => {
+		if (within === undefined || within(value)) values.add(value);
+	};
 	for (const obstacle of obstacles) {
-		const low = vertical ? obstacle.minY : obstacle.minX;
-		const high = vertical ? obstacle.maxY : obstacle.maxX;
-		if (within === undefined || within(low)) values.add(low);
-		if (within === undefined || within(high)) values.add(high);
+		offer(vertical ? obstacle.minY : obstacle.minX);
+		offer(vertical ? obstacle.maxY : obstacle.maxX);
+	}
+	/*
+	 * A lane a pitch to either side of an occupied channel. Obstacle edges are
+	 * the only other source, so an uncluttered canvas offered barely three lanes
+	 * however wide it was, and the fourth trace across it had nowhere legal to
+	 * sit. Only channels between the two endpoints can shorten a route, so the
+	 * rest are skipped without allocating.
+	 */
+	const nearest = Math.min(first, second) - ROUTER_CHANNEL_PITCH;
+	const furthest = Math.max(first, second) + ROUTER_CHANNEL_PITCH;
+	for (const channel of channels) {
+		if (channel < nearest || channel > furthest) continue;
+		offer(channel - ROUTER_CHANNEL_PITCH);
+		offer(channel + ROUTER_CHANNEL_PITCH);
 	}
 	return [...values].sort((left, right) => left - right);
 }
@@ -1699,16 +1859,19 @@ function searchOrthogonalRoute(
 	end: SchematicPoint,
 	obstacles: readonly SchematicRectangle[],
 	index: RoutingIndex,
-	fromId: string,
-	toId: string,
-	netId: string | undefined,
-	bounds: SchematicBounds | undefined,
-	line: number
+	connection: SchematicConnection,
+	bounds: SchematicBounds | undefined
 ): SchematicPoint[] | undefined {
+	const fromId = connection.from.componentId;
+	const toId = connection.to.componentId;
 	const withinX = (value: number) => bounds === undefined || (value >= 0 && value <= bounds.width);
 	const withinY = (value: number) => bounds === undefined || (value >= 0 && value <= bounds.height);
-	const xs = laneCoordinates(start.x, end.x, bounds?.width, obstacles, false, withinX);
-	const ys = laneCoordinates(start.y, end.y, bounds?.height, obstacles, true, withinY);
+	const xs = laneCoordinates(
+		start.x, end.x, bounds?.width, obstacles, false, index.verticalChannels, withinX
+	);
+	const ys = laneCoordinates(
+		start.y, end.y, bounds?.height, obstacles, true, index.horizontalChannels, withinY
+	);
 	const width = xs.length;
 	const startX = xs.indexOf(start.x);
 	const startY = ys.indexOf(start.y);
@@ -1760,7 +1923,7 @@ function searchOrthogonalRoute(
 				Math.abs(from.x - to.x) +
 				Math.abs(from.y - to.y) +
 				(bend ? ROUTER_BEND_PENALTY : 0) +
-				wireSegmentCost(index, from, to, netId);
+				wireSegmentCost(index, from, to, connection);
 			if (g >= (gScore.get(state) ?? Number.POSITIVE_INFINITY)) continue;
 			gScore.set(state, g);
 			previous.set(state, current.state);
@@ -1777,7 +1940,7 @@ function searchOrthogonalRoute(
 	if (finalState === undefined && heap.size > 0 && expanded >= MAX_ROUTER_STATES) {
 		throw new SchematicSyntaxError(
 			`Orthogonal routing complexity exceeds ${MAX_ROUTER_STATES.toLocaleString('en-US')} search states.`,
-			line
+			connection.line
 		);
 	}
 	if (finalState === undefined) return undefined;
@@ -1797,12 +1960,11 @@ function routeBetweenEscapes(
 	end: SchematicPoint,
 	obstacles: readonly SchematicRectangle[],
 	index: RoutingIndex,
-	fromId: string,
-	toId: string,
-	netId: string | undefined,
-	bounds: SchematicBounds | undefined,
-	line: number
+	connection: SchematicConnection,
+	bounds: SchematicBounds | undefined
 ): SchematicPoint[] | undefined {
+	const fromId = connection.from.componentId;
+	const toId = connection.to.componentId;
 	const middleX = (start.x + end.x) / 2;
 	const direct = compactOrthogonalPoints([
 		start,
@@ -1813,16 +1975,21 @@ function routeBetweenEscapes(
 	let best: SchematicPoint[] | undefined;
 	let bestScore = Number.POSITIVE_INFINITY;
 	if (!routeIntersectsObstacles(direct, index, fromId, toId)) {
-		const occupancy = routeOccupancyCost(direct, index, netId);
+		const occupancy = routeOccupancyCost(direct, index, connection);
 		if (occupancy === 0) return direct;
-		best = direct;
-		bestScore = candidateLength(direct) + candidateBends(direct) * ROUTER_BEND_PENALTY + occupancy;
+		/* An infinite occupancy is a contact the validator rejects, so the
+		   candidate is not a fallback — leaving `best` unset is what hands the
+		   route to the sparse search below instead of to a certain failure. */
+		if (occupancy < Number.POSITIVE_INFINITY) {
+			best = direct;
+			bestScore = candidateLength(direct) + candidateBends(direct) * ROUTER_BEND_PENALTY + occupancy;
+		}
 	}
 	const consider = (raw: SchematicPoint[]): void => {
 		const candidate = compactOrthogonalPoints(raw);
 		const baseScore = candidateLength(candidate) + candidateBends(candidate) * ROUTER_BEND_PENALTY;
 		if (baseScore >= bestScore || routeIntersectsObstacles(candidate, index, fromId, toId)) return;
-		const score = baseScore + routeOccupancyCost(candidate, index, netId);
+		const score = baseScore + routeOccupancyCost(candidate, index, connection);
 		if (score < bestScore) {
 			best = candidate;
 			bestScore = score;
@@ -1837,19 +2004,23 @@ function routeBetweenEscapes(
 	 */
 	const spanX = Math.abs(end.x - start.x);
 	const spanY = Math.abs(end.y - start.y);
-	const yLanes = laneCoordinates(start.y, end.y, bounds?.height, obstacles, true);
+	const yLanes = laneCoordinates(
+		start.y, end.y, bounds?.height, obstacles, true, index.horizontalChannels
+	);
 	for (const y of yLanes) {
 		if (bounds !== undefined && (y < 0 || y > bounds.height)) continue;
 		if (Math.abs(y - start.y) + spanX + Math.abs(end.y - y) >= bestScore) continue;
 		consider([start, { x: start.x, y }, { x: end.x, y }, end]);
 	}
-	const xLanes = laneCoordinates(start.x, end.x, bounds?.width, obstacles, false);
+	const xLanes = laneCoordinates(
+		start.x, end.x, bounds?.width, obstacles, false, index.verticalChannels
+	);
 	for (const x of xLanes) {
 		if (bounds !== undefined && (x < 0 || x > bounds.width)) continue;
 		if (Math.abs(x - start.x) + spanY + Math.abs(end.x - x) >= bestScore) continue;
 		consider([start, { x, y: start.y }, { x, y: end.y }, end]);
 	}
-	return best ?? searchOrthogonalRoute(start, end, obstacles, index, fromId, toId, netId, bounds, line);
+	return best ?? searchOrthogonalRoute(start, end, obstacles, index, connection, bounds);
 }
 
 /**
@@ -1957,7 +2128,7 @@ function routeConnectionInternal(
 	const sy = formatNumber(start.y);
 	const ex = formatNumber(end.x);
 	const ey = formatNumber(end.y);
-	const routingIndex = spatialIndex ?? createRoutingIndex(components);
+	const routingIndex = spatialIndex ?? createRoutingIndex(components, [connection]);
 	if (connection.curve === 'bezier') {
 		const middleX = (start.x + end.x) / 2;
 		const controlA = { x: middleX, y: start.y };
@@ -1996,7 +2167,7 @@ function routeConnectionInternal(
 				to.component.id,
 				'route'
 			) === undefined &&
-			wireSegmentCost(routingIndex, start, end, connection.netId) === 0
+			wireSegmentCost(routingIndex, start, end, connection) === 0
 		) {
 			return validateMarkerCollisions(
 				connection,
@@ -2006,45 +2177,27 @@ function routeConnectionInternal(
 				to.component.id
 			);
 		}
-		const fromObstacle = componentObstacleRectangle(from.component);
-		const toObstacle = componentObstacleRectangle(to.component);
-		const escape = (
-			geometry: { readonly point: SchematicPoint; readonly normal: SchematicPoint },
-			obstacle: SchematicRectangle
-		): SchematicPoint => ({
-			x:
-				geometry.normal.x < 0
-					? obstacle.minX
-					: geometry.normal.x > 0
-						? obstacle.maxX
-						: geometry.point.x,
-			y:
-				geometry.normal.y < 0
-					? obstacle.minY
-					: geometry.normal.y > 0
-						? obstacle.maxY
-						: geometry.point.y
-		});
-		const startEscape = escape(from, fromObstacle);
-		const endEscape = escape(to, toObstacle);
 		const obstacleRectangles = routingRectangles(
 			routingIndex,
 			from.component.id,
 			to.component.id
 		);
 		const middle = routeBetweenEscapes(
-			startEscape,
-			endEscape,
+			escapePoint(from, componentObstacleRectangle(from.component)),
+			escapePoint(to, componentObstacleRectangle(to.component)),
 			obstacleRectangles,
 			routingIndex,
-			from.component.id,
-			to.component.id,
-			connection.netId,
-			bounds,
-			connection.line
+			connection,
+			bounds
 		);
 		if (middle === undefined) {
-			throw new SchematicSyntaxError('No collision-free orthogonal route exists.', connection.line);
+			/* The router now refuses contacts the contact validator would reject, so
+			   this is the one diagnostic an unroutable trace reaches. Name the
+			   endpoints and the three things that actually free up a channel. */
+			throw new SchematicSyntaxError(
+				`No orthogonal route from ${connection.from.componentId}.${connection.from.port} to ${connection.to.componentId}.${connection.to.port} clears every component and earlier trace: move one of them apart, widen the fence bounds, or join the traces that meet with a shared net.`,
+				connection.line
+			);
 		}
 		const points = compactOrthogonalPoints([start, ...middle, end]);
 		/*
@@ -2117,16 +2270,39 @@ export function routeConnection(
 	return routeConnectionInternal(connection, components, bounds, undefined);
 }
 
-/** Whether two connection records resolve to the same electrical topology. */
+/** Whether two endpoints address one physical terminal; ports are canonical. */
+function sameTerminal(left: SchematicEndpoint, right: SchematicEndpoint): boolean {
+	return left.componentId === right.componentId && left.port === right.port;
+}
+
+/**
+ * Whether two connection records resolve to the same electrical topology.
+ *
+ * Compares terminals field by field rather than building `id.port` keys: this
+ * runs once per candidate wire contact inside the router's innermost loop, and
+ * the array plus four string concatenations it used to allocate there bought
+ * nothing the four comparisons below do not.
+ */
 function connectionsShareNet(left: SchematicConnection, right: SchematicConnection): boolean {
 	if (left.netId !== undefined && right.netId !== undefined) return left.netId === right.netId;
 	if (left.net !== undefined && right.net !== undefined && left.net === right.net) return true;
-	const leftEndpoints = [
-		`${left.from.componentId}.${left.from.port}`,
-		`${left.to.componentId}.${left.to.port}`
-	];
-	return leftEndpoints.includes(`${right.from.componentId}.${right.from.port}`) ||
-		leftEndpoints.includes(`${right.to.componentId}.${right.to.port}`);
+	return (
+		sameTerminal(left.from, right.from) ||
+		sameTerminal(left.from, right.to) ||
+		sameTerminal(left.to, right.from) ||
+		sameTerminal(left.to, right.to)
+	);
+}
+
+/**
+ * Whether two traces are allowed to touch.
+ *
+ * This is the single rule the router costs against and the contact validator
+ * rejects against. Keeping one predicate is what stops the two from disagreeing
+ * about whether a route is legal.
+ */
+function contactPermitted(left: SchematicConnection, right: SchematicConnection): boolean {
+	return connectionsAreInternalToSameComponent(left, right) || connectionsShareNet(left, right);
 }
 
 /** Internal pin-to-pin fixture routes may coexist inside one owning component body. */
@@ -2145,8 +2321,7 @@ function connectionsAreInternalToSameComponent(
 function traceSegments(
 	route: RoutedConnection,
 	routeIndex: number,
-	firstId: number,
-	netId?: string
+	connection: SchematicConnection
 ): TraceSegment[] {
 	let points: readonly SchematicPoint[] = route.points;
 	if (route.curve === 'bezier') {
@@ -2179,9 +2354,8 @@ function traceSegments(
 		const end = points[index]!;
 		if (start.x === end.x && start.y === end.y) continue;
 		segments.push({
-			id: firstId + segments.length,
 			routeIndex,
-			...(netId === undefined ? {} : { netId }),
+			connection,
 			seen: 0,
 			start,
 			end,
@@ -2193,26 +2367,27 @@ function traceSegments(
 
 /** Classify any inclusive contact between two finite line segments. */
 function segmentContact(
-	left: TraceSegment,
+	leftStart: SchematicPoint,
+	leftEnd: SchematicPoint,
 	right: TraceSegment
 ): { readonly overlap: boolean; readonly strict: boolean } | undefined {
-	const rx = left.end.x - left.start.x;
-	const ry = left.end.y - left.start.y;
+	const rx = leftEnd.x - leftStart.x;
+	const ry = leftEnd.y - leftStart.y;
 	const sx = right.end.x - right.start.x;
 	const sy = right.end.y - right.start.y;
-	const qx = right.start.x - left.start.x;
-	const qy = right.start.y - left.start.y;
+	const qx = right.start.x - leftStart.x;
+	const qy = right.start.y - leftStart.y;
 	const denominator = rx * sy - ry * sx;
 	const epsilon = 1e-9;
 	if (Math.abs(denominator) <= epsilon) {
 		if (Math.abs(qx * ry - qy * rx) > epsilon) return undefined;
 		const useX = Math.abs(rx) >= Math.abs(ry);
-		const leftStart = useX ? left.start.x : left.start.y;
-		const leftEnd = useX ? left.end.x : left.end.y;
-		const rightStart = useX ? right.start.x : right.start.y;
-		const rightEnd = useX ? right.end.x : right.end.y;
-		const low = Math.max(Math.min(leftStart, leftEnd), Math.min(rightStart, rightEnd));
-		const high = Math.min(Math.max(leftStart, leftEnd), Math.max(rightStart, rightEnd));
+		const fromLeft = useX ? leftStart.x : leftStart.y;
+		const toLeft = useX ? leftEnd.x : leftEnd.y;
+		const fromRight = useX ? right.start.x : right.start.y;
+		const toRight = useX ? right.end.x : right.end.y;
+		const low = Math.max(Math.min(fromLeft, toLeft), Math.min(fromRight, toRight));
+		const high = Math.min(Math.max(fromLeft, toLeft), Math.max(fromRight, toRight));
 		if (high < low - epsilon) return undefined;
 		return { overlap: high > low + epsilon, strict: false };
 	}
@@ -2237,12 +2412,13 @@ function validateUniversalWireContacts(
 ): void {
 	if (routes.every((route) => route.curve === 'ortho')) return;
 	const buckets = new Map<number, TraceSegment[]>();
-	let nextSegmentId = 0;
+	let query = 0;
 	for (let routeIndex = 0; routeIndex < routes.length; routeIndex += 1) {
-		const segments = traceSegments(routes[routeIndex]!, routeIndex, nextSegmentId);
-		nextSegmentId += segments.length;
+		const segments = traceSegments(routes[routeIndex]!, routeIndex, connections[routeIndex]!);
 		for (const segment of segments) {
-			const checked = new Set<number>();
+			/* Stamp each candidate once, the way the router's own sweep does: a Set
+			   per segment allocated for every span in the document. */
+			query += 1;
 			const minimumBucket = Math.floor(
 				Math.min(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE
 			);
@@ -2251,8 +2427,8 @@ function validateUniversalWireContacts(
 			);
 			for (let bucket = minimumBucket; bucket <= maximumBucket; bucket += 1) {
 				for (const previous of buckets.get(bucket) ?? []) {
-					if (checked.has(previous.id)) continue;
-					checked.add(previous.id);
+					if (previous.seen === query) continue;
+					previous.seen = query;
 					if (
 						Math.max(segment.start.y, segment.end.y) <
 							Math.min(previous.start.y, previous.end.y) ||
@@ -2261,18 +2437,8 @@ function validateUniversalWireContacts(
 					) {
 						continue;
 					}
-					const contact = segmentContact(segment, previous);
-					if (
-						contact === undefined ||
-						connectionsAreInternalToSameComponent(
-							connections[routeIndex]!,
-							connections[previous.routeIndex]!
-						) ||
-						connectionsShareNet(
-							connections[routeIndex]!,
-							connections[previous.routeIndex]!
-						)
-					) {
+					const contact = segmentContact(segment.start, segment.end, previous);
+					if (contact === undefined || contactPermitted(segment.connection, previous.connection)) {
 						continue;
 					}
 					const bridgeable =
@@ -2500,7 +2666,7 @@ export function routeConnections(
 	components: ReadonlyMap<string, SchematicComponent>,
 	bounds?: SchematicBounds
 ): readonly RoutedConnection[] {
-	const spatialIndex = createRoutingIndex(components);
+	const spatialIndex = createRoutingIndex(components, connections);
 	const routes: RoutedConnection[] = [];
 	for (const [routeIndex, connection] of connections.entries()) {
 		const route = routeConnectionInternal(connection, components, bounds, spatialIndex);
@@ -2549,12 +2715,20 @@ export function routeConnections(
 						Math.floor(segment.start.y / CROSSING_BUCKET_SIZE)
 					) ?? []
 				) {
+					/*
+					 * v8 ignore start -- postcondition. The router prices a parallel contact at
+					 * infinity through this same predicate, and prices every span it emits,
+					 * including the terminal stubs reserved before any wire is placed, so two
+					 * orthogonal traces can no longer reach here sharing a channel. Retained
+					 * because it is the assertion that the router and this pass still agree.
+					 */
 					if (
 						axisSegmentsTouch(segment, previous) &&
-						!connectionsShareNet(connections[routeIndex]!, connections[previous.routeIndex]!)
+						!contactPermitted(connections[routeIndex]!, connections[previous.routeIndex]!)
 					) {
 						rejectUnbridgeableContact(routeIndex);
 					}
+					/* v8 ignore stop */
 				}
 				const minBucket = Math.floor(
 					Math.min(segment.start.x, segment.end.x) / CROSSING_BUCKET_SIZE
@@ -2565,7 +2739,7 @@ export function routeConnections(
 				for (let bucket = minBucket; bucket <= maxBucket; bucket += 1) {
 					for (const previous of verticalBuckets.get(bucket) ?? []) {
 						const crossing = segmentCrossing(segment, previous);
-						const shared = connectionsShareNet(
+						const shared = contactPermitted(
 							connections[routeIndex]!,
 							connections[previous.routeIndex]!
 						);
@@ -2585,12 +2759,20 @@ export function routeConnections(
 						Math.floor(segment.start.x / CROSSING_BUCKET_SIZE)
 					) ?? []
 				) {
+					/*
+					 * v8 ignore start -- postcondition. The router prices a parallel contact at
+					 * infinity through this same predicate, and prices every span it emits,
+					 * including the terminal stubs reserved before any wire is placed, so two
+					 * orthogonal traces can no longer reach here sharing a channel. Retained
+					 * because it is the assertion that the router and this pass still agree.
+					 */
 					if (
 						axisSegmentsTouch(segment, previous) &&
-						!connectionsShareNet(connections[routeIndex]!, connections[previous.routeIndex]!)
+						!contactPermitted(connections[routeIndex]!, connections[previous.routeIndex]!)
 					) {
 						rejectUnbridgeableContact(routeIndex);
 					}
+					/* v8 ignore stop */
 				}
 				const minBucket = Math.floor(
 					Math.min(segment.start.y, segment.end.y) / CROSSING_BUCKET_SIZE
@@ -2601,7 +2783,7 @@ export function routeConnections(
 				for (let bucket = minBucket; bucket <= maxBucket; bucket += 1) {
 					for (const previous of horizontalBuckets.get(bucket) ?? []) {
 						const crossing = segmentCrossing(segment, previous);
-						const shared = connectionsShareNet(
+						const shared = contactPermitted(
 							connections[routeIndex]!,
 							connections[previous.routeIndex]!
 						);

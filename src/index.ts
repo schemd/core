@@ -49,6 +49,7 @@ export {
 	SCHEMATIC_LIMITS
 } from './limits.js';
 export {
+	canonicalPortName,
 	classicalGateHeight,
 	composeQuarterTurns,
 	componentObstacleRectangle,

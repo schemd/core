@@ -203,25 +203,36 @@ ic:U1 "IC" at (1710, 150) #emerald [left="A" right="Y"]`,
 	});
 
 	test('reuses atomic symbols, compounds static traces, and emits only requested markers', () => {
-		const markerFence = { bounds: { width: 520, height: 240 }, title: 'Signal markers' };
+		const markerFence = { bounds: { width: 520, height: 260 }, title: 'Signal markers' };
 		const document = parseSchematic(
 			`resistor:R1 "A" at (80, 100) #amber
 resistor:R2 "B" at (240, 100) #amber
 resistor:R3 "C" at (420, 100) #amber
+resistor:R4 "D" at (80, 190) #amber
+resistor:R5 "E" at (240, 190) #amber
+resistor:R6 "F" at (420, 190) #amber
 R1.out -> R2.in #blue [ortho marker-start=dot marker-end=arrow]
-R2.out -> R3.in #blue [ortho marker-start=dot marker-end=arrow]`,
+R2.out -> R3.in #blue [ortho marker-start=dot marker-end=arrow]
+R4.out -> R5.in #blue [ortho]
+R5.out -> R6.in #blue [ortho]`,
 			markerFence
 		);
 		const minimal = renderSchematic(document, markerFence);
 		expect(minimal.match(/id="[^"]+-symbol-resistor"/g)).toHaveLength(1);
-		expect(minimal.match(/href="#[^"]+-symbol-resistor"/g)).toHaveLength(3);
-		expect(
-			minimal.match(/class="schematic-token schematic-token--blue schematic-trace"/g)
-		).toHaveLength(1);
-		expect(minimal).toContain('marker-start="url(#');
-		expect(minimal).toContain('-marker-dot)"');
-		expect(minimal).toContain('marker-end="url(#');
-		expect(minimal).toContain('-marker-arrow)"');
+		expect(minimal.match(/href="#[^"]+-symbol-resistor"/g)).toHaveLength(6);
+		const traces = minimal.match(
+			/class="schematic-token schematic-token--blue schematic-trace" d="([^"]*)"/g
+		);
+		/* Two marked traces stand alone; the two unmarked ones still compound. */
+		expect(traces).toHaveLength(3);
+		expect(traces!.map((trace) => (trace.match(/M /g) ?? []).length)).toEqual([1, 1, 2]);
+		/*
+		 * SVG paints marker-start once per path element and marker-end once more,
+		 * so a marker on a compounded trace would render for a single subpath. Two
+		 * marked connections must therefore produce two of each.
+		 */
+		expect(minimal.match(/marker-start="url\(#[^"]+-marker-dot\)"/g)).toHaveLength(2);
+		expect(minimal.match(/marker-end="url\(#[^"]+-marker-arrow\)"/g)).toHaveLength(2);
 		expect(minimal.match(/<marker /g)).toHaveLength(2);
 		const responsive = renderSchematic(document, { ...markerFence, mode: 'embedded-css' });
 		/* Hover-only wire groups stay out of the tab order under the root's role="img". */
@@ -231,8 +242,8 @@ R2.out -> R3.in #blue [ortho marker-start=dot marker-end=arrow]`,
 		expect(responsive).toContain('schematic-glow-layer');
 
 		const interactive = renderSchematic(document, { ...markerFence, mode: 'full' });
-		expect(interactive.match(/data-wire-source=/g)).toHaveLength(2);
-		expect(interactive.match(/class="schematic-wire"/g)).toHaveLength(2);
+		expect(interactive.match(/data-wire-source=/g)).toHaveLength(4);
+		expect(interactive.match(/class="schematic-wire"/g)).toHaveLength(4);
 	});
 
 	test('renders open markers without surface fills or visible traces through their interiors', () => {

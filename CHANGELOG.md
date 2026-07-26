@@ -2,6 +2,32 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
+## [Unreleased]
+
+### Fixed
+
+- Every connection that declares a closed endpoint marker paints one. SVG resolves `marker-start` at the first vertex of a *path element* and `marker-end` at its last — not once per subpath — so the compound trace that `default` and `embedded-css` output emit showed a single arrowhead however many wires shared a batch. Three `[arrow]` connections in one colour produced three lines and one arrow. Connections carrying `arrow`, `dot`, or `diamond-filled` now keep a path to themselves; unmarked traces still compound, and open markers still travel on their own carrier. Every marker fixture in the suite happened to give each wire a distinct colour, which put every wire in a batch of its own and hid the defect from the goldens.
+- A reversal bus routes. The router scored reuse of an occupied channel as expensive-but-legal while `routeConnections` rejected it outright, so it could return a route it had already proved would be thrown out; a four-wire crossbar failed from the third wire on, with no workaround, since crossing traces must be orthogonal. A contact the contact validator rejects now costs the router infinity through the same predicate the validator uses, every trace reserves its terminal approach before any wire is placed, and a blocked channel offers a lane a pitch to either side. A reversal bus of ten wires compiles where three used to.
+- Port aliases address one terminal everywhere. `SchematicEndpoint.port` has always been documented as canonical, but the parser never normalized it, so topology resolution, contact validation, the netlist and the design rules each keyed on whichever spelling the author typed. `R1.out -> A.in` beside `R1.r -> B.in` was rejected as two nets colliding at a point they shared, while the same diagram spelled `R1.out` twice compiled; `V1.out -> P1.in` escaped the `shorted-supply` rule that `V1.positive -> P1.in` triggered. The parser now rewrites both endpoints to the terminal they resolve to.
+- Integrated-circuit pins serialize at the documented precision. Pin stubs and labels interpolated raw JavaScript numbers while every other vector went through the three-decimal writer, so a pin count that divides badly emitted seventeen significant digits — and a drawn stub end that disagreed with the routed port point below the third decimal.
+- A terminal can no longer be wired to itself. `R1.in -> R1.in` compiled to `d="M 158 200 H 158"`: a wire that paints nothing, carries a label nobody can see, and adds a one-terminal net. Aliases made it easy to write by accident, since `emitter` and `source` are one lead on a MOSFET.
+
+### Changed
+
+- An unroutable orthogonal connection names both endpoints and three things that free a channel, in place of the bare `No collision-free orthogonal route exists.` The router now refuses contacts the validator would reject, so this is the diagnostic such a trace reaches.
+- `canonicalPortName` is exported. Hosts that resolve author-written port names — link targets, hover cards, netlist overlays — need the same answer the compiler uses.
+
+### Verified
+
+- A regression suite states each defect and pins the property that makes it impossible, rather than the output that happened to change. Where the old behaviour was *asserted by the suite* — a compound path carrying one arrowhead for two wires, a transistor lead wired to itself — the assertion is now its inverse.
+- Four mutants join the kill gate: a rejected contact must cost the router infinity, terminal approaches must be reserved before routing, a blocked channel must offer a lane aside, and a closed marker must keep its trace out of a compound path. Eleven of eleven are killed.
+- Two Chromium goldens cover the blind spot the existing four shared: four same-colour wires that each declare a closed marker, and a four-wire reversal bus.
+
+### Performance
+
+- Cubic Bézier obstacle testing no longer allocates four mapped arrays and four spreads per subdivision, on a function that halves the curve until its hull is a quarter-unit across. Bézier-heavy documents compile roughly 60% faster.
+- Wire-contact testing allocates nothing per call, and the universal contact pass stamps candidates instead of allocating a `Set` for every span in the document. Dense orthogonal routing pays about 13% more than 0.3.8 overall: the router now prices spans it previously emitted blind, and has more places to put a wire.
+
 ## [0.3.8] - 07/26/2026
 
 ### Changed

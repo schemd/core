@@ -402,8 +402,12 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 			{ width: 640, height: 320 }
 		);
 		expect(separated[0]!.d).toBe('M 112 180 H 528');
-		expect(separated[1]!.d).not.toBe('M 72 180 H 548');
-		expect(separated[1]!.d).toMatch(/ V (0|320) /);
+		/*
+		 * The second trace shares the first one's row, so it must leave it — but a
+		 * lane one pitch clear of the occupied channel is a far better answer than
+		 * the trip to the canvas edge that obstacle-derived lanes alone could offer.
+		 */
+		expect(separated[1]!.d).toBe('M 72 180 H 84 V 168 H 536 V 180 H 548');
 	});
 
 	test('adds one bridge arc to the later non-junction orthogonal trace', () => {
@@ -622,6 +626,11 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 			get: (id: string) => components.get(id),
 			values: () => [][Symbol.iterator]()
 		} as unknown as ReadonlyMap<string, SchematicComponent>;
+		/*
+		 * Terminals a ten-thousandth apart leave no channel between them, so the
+		 * router reports that it cannot clear them rather than laying a trace whose
+		 * bridge arcs would collapse to nothing.
+		 */
 		expect(() => routeConnections(
 			[
 				connection('T1', 'out', 'B1', 'out'),
@@ -629,7 +638,7 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 				connection('L', 'out', 'R', 'in')
 			],
 			endpointOnlyMap
-		)).toThrow(/Separate nets touch|Wire crossings are too close/);
+		)).toThrow(/No orthogonal route|Wire crossings are too close/);
 		expect(() => routeConnections(
 			[
 				connection('L1', 'out', 'R1', 'in'),
@@ -637,7 +646,7 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 				connection('T', 'out', 'B', 'out')
 			],
 			endpointOnlyMap
-		)).toThrow(/Separate nets touch|Wire crossings are too close/);
+		)).toThrow(/No orthogonal route|Wire crossings are too close/);
 	});
 
 	test('rejects non-orthogonal separate-net crossings and permits shared-net crossings', () => {
@@ -745,12 +754,20 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 		expect(() =>
 			routeConnections([connection('T1', 'B1'), connection('T2', 'B2')], endpointOnlyMap)
 		).toThrow(/Separate nets touch/);
-		expect(() =>
-			routeConnections(
-				[connection('T1', 'B1', 'ortho'), connection('T2', 'B2', 'ortho')],
-				endpointOnlyMap
-			)
-		).toThrow(/Separate nets touch/);
+		/*
+		 * The same pair as a straight line has nowhere to go and is rejected above.
+		 * Orthogonally there is a whole canvas of room, so the router owes the
+		 * author two traces in adjacent channels rather than a diagnostic.
+		 */
+		const sharedColumn = routeConnections(
+			[connection('T1', 'B1', 'ortho'), connection('T2', 'B2', 'ortho')],
+			endpointOnlyMap
+		);
+		expect(sharedColumn[0]!.d).not.toBe(sharedColumn[1]!.d);
+		expect(sharedColumn.map((route) => route.d)).toEqual([
+			'M 300 42 V 54 H 288 V 354 H 300 V 342',
+			'M 300 122 V 134 H 312 V 434 H 300 V 422'
+		]);
 		expect(() =>
 			routeConnections(
 				[connection('L1', 'R1', 'ortho'), connection('TE', 'BE', 'ortho')],
@@ -847,7 +864,7 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 			color: token, curve: 'ortho', markerStart: 'none', markerEnd: 'none', line: 9
 		};
 		expect(() => routeConnection(connection, components, { width: 500, height: 200 })).toThrow(
-			'Line 9: No collision-free orthogonal route exists.'
+			'Line 9: No orthogonal route from L.out to R.in clears every component and earlier trace: move one of them apart, widen the fence bounds, or join the traces that meet with a shared net.'
 		);
 	});
 
@@ -962,7 +979,9 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 			from: { componentId: 'TOP', port: 'target' },
 			to: { componentId: 'BOTTOM', port: 'control' },
 			color: token, curve: 'ortho', markerStart: 'none', markerEnd: 'none', line: 13
-		}, components)).toThrow('Line 13: No collision-free orthogonal route exists.');
+		}, components)).toThrow(
+			'Line 13: No orthogonal route from TOP.target to BOTTOM.control clears every component and earlier trace: move one of them apart, widen the fence bounds, or join the traces that meet with a shared net.'
+		);
 	});
 
 	test('connects aligned terminals when endpoint clearance corridors overlap', () => {

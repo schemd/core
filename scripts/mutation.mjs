@@ -28,18 +28,46 @@ const mutants = [
 		tests: ['tests/layout.test.ts']
 	},
 	{
-		name: 'unrelated routes cannot reuse an occupied channel',
+		name: 'a contact the validator rejects must cost the router infinity',
 		file: 'src/layout.ts',
-		from: 'const ROUTER_CHANNEL_REUSE_PENALTY = 16_384;',
-		to: 'const ROUTER_CHANNEL_REUSE_PENALTY = 0;',
-		tests: ['tests/layout.test.ts']
+		from: '\t\t\t\tif (!contact.strict || contact.overlap || !previous.orthogonal) {\n\t\t\t\t\treturn Number.POSITIVE_INFINITY;\n\t\t\t\t}',
+		to: '\t\t\t\tif (false) {\n\t\t\t\t\treturn Number.POSITIVE_INFINITY;\n\t\t\t\t}',
+		tests: ['tests/layout.test.ts', 'tests/regressions.test.ts']
 	},
 	{
-		name: 'strict crossings stay cheaper than collinear overlap',
+		name: 'strict crossings stay cheaper than a blocked channel',
 		file: 'src/layout.ts',
-		from: 'cost += contact.strict && !contact.overlap',
-		to: 'cost += !contact.strict && !contact.overlap',
-		tests: ['tests/layout.test.ts', 'tests/topology.test.ts']
+		from: 'cost += ROUTER_CROSSING_PENALTY;',
+		to: 'cost += ROUTER_CROSSING_PENALTY * 0;',
+		tests: ['tests/layout.test.ts', 'tests/topology.test.ts', 'tests/regressions.test.ts']
+	},
+	{
+		name: 'terminal approaches are reserved before any wire is placed',
+		file: 'src/layout.ts',
+		from: '\t\tif (connection.curve !== \'ortho\') continue;',
+		to: '\t\tif (connection.curve === \'ortho\') continue;',
+		tests: ['tests/regressions.test.ts']
+	},
+	{
+		name: 'a blocked channel offers a lane one pitch aside',
+		file: 'src/layout.ts',
+		from: 'const ROUTER_CHANNEL_PITCH = 12;',
+		to: 'const ROUTER_CHANNEL_PITCH = 0;',
+		tests: ['tests/layout.test.ts', 'tests/regressions.test.ts']
+	},
+	{
+		name: 'port aliases resolve to one canonical terminal',
+		file: 'src/layout.ts',
+		from: '\t\ttable.get(port) ?? table.get(terminalPointKey(resolvePortPoint(component, port))) ?? port',
+		to: '\t\ttable.get(port) ?? port',
+		tests: ['tests/regressions.test.ts']
+	},
+	{
+		name: 'a closed marker keeps its trace out of a compound path',
+		file: 'src/renderer.ts',
+		from: "\t\tconst key = markerAttributes.includes('marker-')",
+		to: "\t\tconst key = markerAttributes.includes('marker-') && false",
+		tests: ['tests/renderer.test.ts', 'tests/regressions.test.ts']
 	},
 	{
 		name: 'vertically touching component bounds are not overlaps',

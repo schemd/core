@@ -92,6 +92,57 @@ L2.out -> R2.in #purple [ortho marker-start=open-arrow marker-end=open-arrow net
 	await expect(page.locator('figure')).toHaveScreenshot('transparent-markers.png');
 });
 
+test('every wire declaring a closed marker paints one', async ({ page }) => {
+	/*
+	 * The batching defect this covers was invisible to the fixtures above because
+	 * each of them gives its wires a distinct colour, which puts every wire in a
+	 * batch of its own. Four arrowheads in one colour is the case that failed.
+	 */
+	await mountSchematic(
+		page,
+		`port:L1 "a" at (70,70) #blue
+port:R1 "a" at (430,70) #blue
+port:L2 "b" at (70,160) #blue
+port:R2 "b" at (430,160) #blue
+port:L3 "c" at (70,250) #blue
+port:R3 "c" at (430,250) #blue
+port:L4 "d" at (70,340) #blue
+port:R4 "d" at (430,340) #blue
+L1.out -> R1.in #blue [arrow]
+L2.out -> R2.in #blue [arrow]
+L3.out -> R3.in #blue [marker-start=dot marker-end=arrow]
+L4.out -> R4.in #blue [marker-start=dot marker-end=arrow]`,
+		{ width: 500, height: 410 },
+		'Batched markers'
+	);
+
+	await expect(page.locator('figure')).toHaveScreenshot('batched-markers.png');
+});
+
+test('a reversal bus routes every trace into its own channel', async ({ page }) => {
+	/* Four wires that each cross all the others: unroutable before the router
+	   stopped scoring a channel it could not legally reuse. */
+	await mountSchematic(
+		page,
+		`port:L0 "0" at (60,80) #blue
+port:R0 "0" at (620,440) #blue
+port:L1 "1" at (60,200) #cyan
+port:R1 "1" at (620,320) #cyan
+port:L2 "2" at (60,320) #amber
+port:R2 "2" at (620,200) #amber
+port:L3 "3" at (60,440) #emerald
+port:R3 "3" at (620,80) #emerald
+L0.out -> R0.in #blue [ortho]
+L1.out -> R1.in #cyan [ortho]
+L2.out -> R2.in #amber [ortho]
+L3.out -> R3.in #emerald [ortho]`,
+		{ width: 700, height: 520 },
+		'Reversal bus'
+	);
+
+	await expect(page.locator('figure')).toHaveScreenshot('reversal-bus.png');
+});
+
 test('CNOT exposes two continuous qubit rails in every horizontal direction', async ({ page }) => {
 	await mountSchematic(
 		page,
