@@ -31,7 +31,7 @@ import {
 	type UmlComponent
 } from './types.js';
 import { mathLabelTextWidth } from './math-label.js';
-import { MAX_SCHEMATIC_WIRE_CROSSINGS } from './limits.js';
+import { resolveSchematicLimits, SCHEMATIC_LIMITS } from './limits.js';
 
 /** Axis-aligned rectangle expressed in absolute schematic coordinates. */
 export interface SchematicRectangle {
@@ -242,12 +242,16 @@ const CROSSING_BUCKET_SIZE = 64;
  * Column stride for the obstacle hash's composite cell key.
  *
  * Cells are addressed on both axes, so a cell key is `column * stride + row`
- * (the column term is hoisted out of each row loop). Schematic bounds cap at
- * 4096 units — 64 cells per axis — and only label overhang and routing margins
- * reach outside them, so a stride this large keeps every reachable
- * (column, row) pair distinct.
+ * (the column term is hoisted out of each row loop). Distinct cells must produce
+ * distinct keys, which needs `|row| < stride / 2`, and the key must stay an
+ * exact double, which needs `|column| * stride < 2^53`.
+ *
+ * A stride of 2^26 satisfies both for any canvas a host can allocate: rows stay
+ * distinct out to 2^25 cells — a diagram 2.1 billion units tall — and columns
+ * stay exact out to 2^27. The ceiling that used to make a small stride safe was
+ * the 4096-unit canvas, and diagrams are no longer capped at a size.
  */
-const BUCKET_COLUMN_STRIDE = 8192;
+const BUCKET_COLUMN_STRIDE = 2 ** 26;
 
 /** Tolerance segmentContact treats as touching; spatial filters must match it. */
 const CONTACT_EPSILON = 1e-9;
@@ -2664,7 +2668,8 @@ function bridgedOrthogonalPath(
 export function routeConnections(
 	connections: readonly SchematicConnection[],
 	components: ReadonlyMap<string, SchematicComponent>,
-	bounds?: SchematicBounds
+	bounds?: SchematicBounds,
+	wireCrossings: number = SCHEMATIC_LIMITS.wireCrossings
 ): readonly RoutedConnection[] {
 	const spatialIndex = createRoutingIndex(components, connections);
 	const routes: RoutedConnection[] = [];
@@ -2690,9 +2695,9 @@ export function routeConnections(
 		if (!recordedCrossings.has(key)) {
 			recordedCrossings.add(key);
 			crossingCount += 1;
-			if (crossingCount > MAX_SCHEMATIC_WIRE_CROSSINGS) {
+			if (crossingCount > wireCrossings) {
 				throw new SchematicSyntaxError(
-					`Wire crossing complexity exceeds ${MAX_SCHEMATIC_WIRE_CROSSINGS.toLocaleString('en-US')} intersections.`,
+					`Wire crossing complexity exceeds ${wireCrossings.toLocaleString('en-US')} intersections.`,
 					connections[routeIndex]?.line
 				);
 			}
@@ -3227,7 +3232,8 @@ export function validateDocumentGeometry(
 		routeConnections(
 			document.connections,
 			new Map(document.components.map((component) => [component.id, component])),
-			fence.bounds
+			fence.bounds,
+			resolveSchematicLimits(fence.limits).wireCrossings
 		);
 	if (routes.length !== document.connections.length) {
 		throw new TypeError('Routed connection count does not match the schematic document.');

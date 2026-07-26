@@ -41,12 +41,14 @@ export {
 	type MathLabelSegmentKind
 } from './math-label.js';
 export {
-	MAX_SCHEMATIC_COMPONENTS,
-	MAX_SCHEMATIC_CONNECTIONS,
+	MAX_SCHEMATIC_BOUND,
 	MAX_SCHEMATIC_WIRE_CROSSINGS,
+	MIN_SCHEMATIC_BOUND,
 	MAX_SCHEMATIC_SOURCE_CHARACTERS,
 	MAX_SCHEMATIC_SVG_OUTPUT_BYTES,
-	SCHEMATIC_LIMITS
+	resolveSchematicLimits,
+	SCHEMATIC_LIMITS,
+	type SchematicResolvedLimits
 } from './limits.js';
 export {
 	canonicalPortName,
@@ -158,6 +160,7 @@ export {
 	type SchematicDocument,
 	type SchematicEndpoint,
 	type SchematicFence,
+	type SchematicLimitOptions,
 	type SchematicOrientation,
 	type SchematicSignalMarker,
 	type SchematicSemanticHook,

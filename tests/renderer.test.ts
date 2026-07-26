@@ -532,11 +532,19 @@ ic:U1 "Flight control multiplexer" at (390, 130) #cyan [left="SELECT_LONG" right
 	});
 
 	test('aborts incremental rendering before exceeding the bounded SVG output budget', () => {
-		const writer = new BoundedSvgWriter();
-		const allocation = 'x'.repeat(MAX_SVG_OUTPUT_BYTES - 1);
+		/*
+		 * Exercised at a limit small enough to reach, because the compiler's own is
+		 * now sized so that only markup no host could hold gets near it. The
+		 * boundary arithmetic is what matters: a multi-byte character that crosses
+		 * the ceiling is refused whole, and the writer stays usable afterwards.
+		 */
+		const writer = new BoundedSvgWriter(1_024);
+		const allocation = 'x'.repeat(1_023);
 		writer.append(allocation);
-		expect(() => writer.append('é')).toThrow(/2,097,152 byte output limit/);
+		expect(() => writer.append('é')).toThrow(/1,024 byte output limit/);
 		writer.append('x');
 		expect(writer.finish()).toBe(allocation + 'x');
+		expect(() => new BoundedSvgWriter().append('x')).not.toThrow();
+		expect(MAX_SVG_OUTPUT_BYTES).toBe(268_435_456);
 	});
 });

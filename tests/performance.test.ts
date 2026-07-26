@@ -58,6 +58,51 @@ describe('operation-based performance regression gates', () => {
 		expect(elapsedMs).toBeLessThan(2_000);
 	});
 
+	test('stays linear per component well past the retired 512 ceiling', () => {
+		/*
+		 * Removing a cap is only worth anything if the work behind it scales. This
+		 * measures cost per component at two sizes an order of magnitude apart: the
+		 * larger must not cost materially more each, which is what rules out a
+		 * quadratic term hiding behind the old ceiling.
+		 */
+		const grid = (count: number) => {
+			const columns = Math.ceil(Math.sqrt(count * 1.6));
+			const lines: string[] = [];
+			for (let index = 0; index < count; index += 1) {
+				lines.push(
+					`resistor:R${index} "R" at (${60 + (index % columns) * 110},${60 + Math.floor(index / columns) * 100}) #amber`
+				);
+			}
+			for (let index = 0; index + 1 < count; index += 2) {
+				if (Math.floor(index / columns) !== Math.floor((index + 1) / columns)) continue;
+				lines.push(`R${index}.out -> R${index + 1}.in #amber [ortho]`);
+			}
+			return {
+				source: lines.join('\n'),
+				bounds: {
+					width: 120 + columns * 110,
+					height: 160 + Math.ceil(count / columns) * 100
+				}
+			};
+		};
+		const perComponent = (count: number): number => {
+			const { source, bounds } = grid(count);
+			const startedAt = Date.now();
+			const result = compileSchematic(source, {
+				bounds,
+				title: 'Scaling gate',
+				idPrefix: 'scale'
+			});
+			expect(result.document.components).toHaveLength(count);
+			return (Date.now() - startedAt) / count;
+		};
+
+		const small = perComponent(1_000);
+		const large = perComponent(10_000);
+		expect(large).toBeLessThan(Math.max(small, 0.01) * 4);
+		expect(large * 10_000).toBeLessThan(10_000);
+	});
+
 	test('amortizes repeated canonical geometry below a per-instance byte ceiling', () => {
 		const one = compileSchematic(repeatedResistors(1), {
 			bounds: { width: 4096, height: 2200 },

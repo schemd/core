@@ -12,15 +12,31 @@ All notable changes to `@schemd/core` are recorded here. Dates describe actual n
 - Integrated-circuit pins serialize at the documented precision. Pin stubs and labels interpolated raw JavaScript numbers while every other vector went through the three-decimal writer, so a pin count that divides badly emitted seventeen significant digits — and a drawn stub end that disagreed with the routed port point below the third decimal.
 - A terminal can no longer be wired to itself. `R1.in -> R1.in` compiled to `d="M 158 200 H 158"`: a wire that paints nothing, carries a label nobody can see, and adds a one-terminal net. Aliases made it easy to write by accident, since `emitter` and `source` are one lead on a MOSFET.
 
+### Added
+
+- **`limits`: an optional per-compilation resource budget.** `components`, `connections`, `sourceCharacters`, `wireCrossings` and `svgOutputBytes` may each be set on the compile options; every omitted field keeps its default, so passing nothing behaves exactly as before, and `Infinity` states no limit explicitly. This restores the cheap early rejection the retired counts used to provide, under the control of the host that knows whether the source is trustworthy: a budget rejects a document at the declaration that crosses it, before any routing or rendering.
+- The budget is resolved once per compilation and handed to both passes, so an accessor cannot be generous to the parser and mean to the renderer — the same defence the fence's bounds and title already had. `compileSchematic` now snapshots bounds for the same reason.
+- A misspelled field is an error rather than a silent no-op. A limit a host believes it set and did not is worse than no limit at all.
+
+### Removed
+
+- **A document is no longer capped at a component or connection count.** `MAX_SCHEMATIC_COMPONENTS` and `MAX_SCHEMATIC_CONNECTIONS` are gone, along with their entries in `SCHEMATIC_LIMITS` — a diagram may declare as many of either as it can place. Removing the counts alone would have changed nothing a user could see, because three other ceilings stood behind them: a 4,096-unit canvas that could not hold a thousand parts however many the parser allowed, a 131,072-character source cap that ran out near three thousand declarations, and a 2 MiB output cap. The canvas now runs to 1,048,576 units a side, one call reads up to 16,777,216 characters, and the writer emits up to 256 MiB. What remains bounds allocation, not diagram size. **Breaking for anyone importing the two constants or reading `SCHEMATIC_LIMITS.components`.**
+- Scaling was measured rather than assumed: 64,000 components with 32,000 connections compile in about a second, at a flat 16 µs per component from 8,000 up. 11,200 components with 800 obstacle-dodging orthogonal traces take 130 ms. A performance gate now compares per-component cost at 1,000 and 10,000 components, so a quadratic term cannot reappear behind the retired ceiling.
+- **Hosts compiling untrusted source should set a `limits` budget and a timeout.** The old counts doubled as a cheap early rejection; the defaults that replaced them sit far past any readable diagram, and no byte ceiling stops a small document from being expensive to route.
+
 ### Changed
 
 - An unroutable orthogonal connection names both endpoints and three things that free a channel, in place of the bare `No collision-free orthogonal route exists.` The router now refuses contacts the validator would reject, so this is the diagnostic such a trace reaches.
+- Canvas and title validation live in one place each instead of three near-identical copies across the fence parser, the runtime parser boundary and the renderer. `Render title must be a non-empty string of at most 512 characters.` is now `Render titles cannot be empty.` / `Render titles cannot exceed 512 characters.`, matching the parser's wording.
+- The two size budgets rise to 32 KiB and 35 KiB gzip, from 31 KiB and 34 KiB. The configurable budget, port canonicalization and the routing fixes are real additions; the gate caught the growth, the two deduplications above paid part of it back, and the rest is recorded here rather than absorbed silently.
+- The routing spatial hash addresses cells with a 2^26 column stride. The old 8,192 stride was only collision-free because bounds stopped at 4,096 units; two traces on a larger canvas would have hashed into one bucket and been compared as though they touched.
+- `BoundedSvgWriter` takes an optional byte ceiling, defaulting to the compiler's. Verifying the boundary no longer means allocating 256 MiB to reach it.
 - `canonicalPortName` is exported. Hosts that resolve author-written port names — link targets, hover cards, netlist overlays — need the same answer the compiler uses.
 
 ### Verified
 
 - A regression suite states each defect and pins the property that makes it impossible, rather than the output that happened to change. Where the old behaviour was *asserted by the suite* — a compound path carrying one arrowhead for two wires, a transistor lead wired to itself — the assertion is now its inverse.
-- Four mutants join the kill gate: a rejected contact must cost the router infinity, terminal approaches must be reserved before routing, a blocked channel must offer a lane aside, and a closed marker must keep its trace out of a compound path. Eleven of eleven are killed.
+- Seven mutants join the kill gate: a rejected contact must cost the router infinity, terminal approaches must be reserved before routing, a blocked channel must offer a lane aside, a closed marker must keep its trace out of a compound path, a supplied budget must be enforced rather than accepted, a misspelled budget field must fail, and one budget must govern the whole compilation. Fourteen of fourteen are killed.
 - Two Chromium goldens cover the blind spot the existing four shared: four same-colour wires that each declare a closed marker, and a four-wire reversal bus.
 
 ### Performance

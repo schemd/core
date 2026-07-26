@@ -77,6 +77,27 @@ const mutants = [
 		tests: ['tests/layout.test.ts']
 	},
 	{
+		name: 'a caller-supplied budget is enforced, not merely accepted',
+		file: 'src/limits.ts',
+		from: '\t\tresolved[name] = limit;',
+		to: '\t\tresolved[name] = resolved[name]!;',
+		tests: ['tests/regressions.test.ts']
+	},
+	{
+		name: 'a misspelled budget field fails instead of being ignored',
+		file: 'src/limits.ts',
+		from: '\t\tif (!CONFIGURABLE_LIMITS.includes(name)) {',
+		to: '\t\tif (false && CONFIGURABLE_LIMITS.includes(name)) {',
+		tests: ['tests/regressions.test.ts']
+	},
+	{
+		name: 'one budget governs the whole compilation',
+		file: 'src/compiler.ts',
+		from: '\t\tlimits: resolveSchematicLimits(options.limits)',
+		to: '\t\tlimits: options.limits',
+		tests: ['tests/regressions.test.ts']
+	},
+	{
 		name: 'open triangle interiors stay transparent',
 		file: 'src/renderer.ts',
 		from: 'd="M0 1 11 6 0 11Z" fill="none"',

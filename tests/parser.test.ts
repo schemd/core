@@ -4,6 +4,7 @@ import {
 	parseSchematic,
 	parseSchematicColor,
 	parseSchematicFence,
+	SCHEMATIC_LIMITS,
 	SchematicSyntaxError,
 	type SchematicFence
 } from '../src/index.js';
@@ -60,10 +61,10 @@ describe('parseSchematicFence', () => {
 		for (const info of [
 			'schemd bounds="63x100"',
 			'schemd bounds="100x63"',
-			'schemd bounds="4097x100"',
-			'schemd bounds="100x4097"'
+			'schemd bounds="1048577x100"',
+			'schemd bounds="100x1048577"'
 		]) {
-			expect(() => parseSchematicFence(info)).toThrow(/64 through 4096/);
+			expect(() => parseSchematicFence(info)).toThrow(/64 through 1,048,576/);
 		}
 		expect(() => parseSchematicFence(`schemd bounds="640x260" title="${'x'.repeat(513)}"`)).toThrow(
 			/titles cannot exceed 512/
@@ -92,8 +93,8 @@ describe('parseSchematic', () => {
 			{ bounds: { width: 640, height: 260.5 }, title: 'x' },
 			{ bounds: { width: 63, height: 260 }, title: 'x' },
 			{ bounds: { width: 640, height: 63 }, title: 'x' },
-			{ bounds: { width: 4097, height: 260 }, title: 'x' },
-			{ bounds: { width: 640, height: 4097 }, title: 'x' },
+			{ bounds: { width: 1_048_577, height: 260 }, title: 'x' },
+			{ bounds: { width: 640, height: 1_048_577 }, title: 'x' },
 			{ bounds: { width: 640, height: 260 }, title: 10 },
 			{ bounds: { width: 640, height: 260 }, title: '   ' },
 			{ bounds: { width: 640, height: 260 }, title: 'x'.repeat(513) }
@@ -548,19 +549,16 @@ U1.in -> U1.out #slate`,
 	});
 
 	test('bounds compiler work for untrusted or accidentally generated input', () => {
-		expect(() => parseSchematic('x'.repeat(131_073), fence)).toThrow(/character limit/);
-
-		const excessiveComponents = Array.from(
-			{ length: 513 },
-			(_, index) => `resistor:R${index + 1} "R" at (80, 80) #amber`
-		).join('\n');
-		expect(() => parseSchematic(excessiveComponents, fence)).toThrow(/512 component limit/);
-
-		const excessiveConnections = [
-			'resistor:R1 "R" at (80, 80) #amber',
-			...Array.from({ length: 2_049 }, () => 'R1.out -> R1.in #slate')
-		].join('\n');
-		expect(() => parseSchematic(excessiveConnections, fence)).toThrow(/2,048 connection limit/);
+		expect(() =>
+			parseSchematic('x'.repeat(SCHEMATIC_LIMITS.sourceCharacters + 1), fence)
+		).toThrow(/character limit/);
+		/*
+		 * What remains bounds allocation, not diagram size: how much text one call
+		 * reads, how much markup it hands back, and how far the crossing pass goes.
+		 * Neither a component nor a connection count appears among them.
+		 */
+		expect(SCHEMATIC_LIMITS.components).toBe(Number.POSITIVE_INFINITY);
+		expect(SCHEMATIC_LIMITS.connections).toBe(Number.POSITIVE_INFINITY);
 	});
 });
 

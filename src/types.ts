@@ -274,12 +274,41 @@ export interface SchematicBounds {
 	height: number;
 }
 
+/**
+ * Host-imposed resource budget for one compilation.
+ *
+ * Every field is optional and every omitted field keeps the compiler default,
+ * so passing nothing compiles exactly as before. Component and connection
+ * counts are unbounded by default: a diagram is limited by what it can place,
+ * not by an arbitrary ceiling. A host compiling source it did not write — a
+ * Markdown fence from a comment, a pull request, a CMS — should set the ones it
+ * cares about, because rejecting an oversized document early is far cheaper
+ * than routing it.
+ *
+ * Values are enforced, not advisory, and are not clamped to the defaults: a
+ * host that raises one has decided it can afford the allocation.
+ */
+export interface SchematicLimitOptions {
+	/** Maximum component declarations. Default: unlimited. */
+	readonly components?: number;
+	/** Maximum directed connections. Default: unlimited. */
+	readonly connections?: number;
+	/** Maximum UTF-16 source characters read in one pass. */
+	readonly sourceCharacters?: number;
+	/** Maximum orthogonal intersections before the crossing pass gives up. */
+	readonly wireCrossings?: number;
+	/** Maximum UTF-8 bytes of generated markup. */
+	readonly svgOutputBytes?: number;
+}
+
 /** Validated metadata parsed from a fenced `schemd` declaration. */
 export interface SchematicFence {
 	/** Static dimensions used to reserve layout space before browser paint. */
 	bounds: SchematicBounds;
 	/** Accessible diagram title, supplied explicitly or by the host default. */
 	title: string;
+	/** Optional per-compilation resource budget; omitted fields keep defaults. */
+	limits?: SchematicLimitOptions;
 }
 
 /** Absolute point in the declared schematic coordinate system. */

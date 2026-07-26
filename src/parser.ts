@@ -78,9 +78,10 @@ import {
 import { mathLabelTextWidth } from './math-label.js';
 import { cacheParsedSchematicRoutes } from './route-cache.js';
 import {
-	MAX_SCHEMATIC_COMPONENTS,
-	MAX_SCHEMATIC_CONNECTIONS,
-	MAX_SCHEMATIC_SOURCE_CHARACTERS
+	normalizeSchematicBounds,
+	normalizeSchematicTitle,
+	resolveSchematicLimits,
+	type SchematicResolvedLimits
 } from './limits.js';
 
 /** Lexical shape of a complete component declaration line. */
@@ -125,8 +126,6 @@ const MAX_UML_ROWS = 64;
 const MAX_UML_ROW_LENGTH = 256;
 /** Ordinary row height used by deterministic UML sizing. */
 const UML_ROW_HEIGHT = 16;
-/** Maximum accessible title length accepted from a fence information string. */
-const MAX_FENCE_TITLE_LENGTH = 512;
 /** Provenance registry for immutable AST objects created by this parser instance. */
 const parsedDocuments = new WeakSet<SchematicDocument>();
 
@@ -1720,6 +1719,11 @@ function assignConnectionNetIds(connections: SchematicConnection[]): void {
 	}
 }
 
+/** A fence whose budget is resolved, so no pass re-reads a caller's getters. */
+interface NormalizedFence extends SchematicFence {
+	readonly limits: SchematicResolvedLimits;
+}
+
 /**
  * Snapshot and validate the public parser's runtime fence boundary.
  *
@@ -1728,7 +1732,7 @@ function assignConnectionNetIds(connections: SchematicConnection[]): void {
  * geometry contract between validation passes. The parser therefore consumes
  * each field once and routes against a fresh data-only record.
  */
-function normalizeParserFence(value: unknown): SchematicFence {
+function normalizeParserFence(value: unknown): NormalizedFence {
 	if (typeof value !== 'object' || value === null) {
 		throw new SchematicSyntaxError('Parser options must be an object.');
 	}
@@ -1737,29 +1741,11 @@ function normalizeParserFence(value: unknown): SchematicFence {
 	if (typeof rawBounds !== 'object' || rawBounds === null) {
 		throw new SchematicSyntaxError('Parser options require bounds.');
 	}
-	const bounds = rawBounds as Record<string, unknown>;
-	const width = bounds.width;
-	const height = bounds.height;
-	const title = candidate.title;
-	if (
-		typeof width !== 'number' ||
-		!Number.isInteger(width) ||
-		typeof height !== 'number' ||
-		!Number.isInteger(height) ||
-		width < 64 ||
-		height < 64 ||
-		width > 4096 ||
-		height > 4096
-	) {
-		throw new SchematicSyntaxError('Schematic bounds must be integers from 64 through 4096.');
-	}
-	if (typeof title !== 'string' || title.trim() === '') {
-		throw new SchematicSyntaxError('Schematic titles cannot be empty.');
-	}
-	if (title.length > MAX_FENCE_TITLE_LENGTH) {
-		throw new SchematicSyntaxError('Schematic titles cannot exceed 512 characters.');
-	}
-	return { bounds: { width, height }, title } satisfies SchematicFence;
+	const rawFields = rawBounds as Record<string, unknown>;
+	const bounds = normalizeSchematicBounds(rawFields.width, rawFields.height, 'Schematic');
+	const title = normalizeSchematicTitle(candidate.title, 'Schematic');
+	const limits = resolveSchematicLimits(candidate.limits);
+	return { bounds, title, limits } satisfies NormalizedFence;
 }
 
 /**
@@ -1786,19 +1772,9 @@ export function parseSchematicFence(
 			'schemd fences require: schemd bounds="WIDTHxHEIGHT" title="Optional title".'
 		);
 	}
-	const width = Number(match[1]);
-	const height = Number(match[2]);
-	if (width < 64 || height < 64 || width > 4096 || height > 4096) {
-		throw new SchematicSyntaxError('Schematic bounds must be integers from 64 through 4096.');
-	}
-	const title = match[3] ?? defaultTitle;
-	if (title.trim() === '') {
-		throw new SchematicSyntaxError('Schematic titles cannot be empty.');
-	}
-	if (title.length > MAX_FENCE_TITLE_LENGTH) {
-		throw new SchematicSyntaxError('Schematic titles cannot exceed 512 characters.');
-	}
-	return { bounds: { width, height }, title } satisfies SchematicFence;
+	const bounds = normalizeSchematicBounds(Number(match[1]), Number(match[2]), 'Schematic');
+	const title = normalizeSchematicTitle(match[3] ?? defaultTitle, 'Schematic');
+	return { bounds, title } satisfies SchematicFence;
 }
 
 /**
@@ -1815,10 +1791,13 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 	if (typeof source !== 'string') {
 		throw new SchematicSyntaxError('Schematic source must be a string.');
 	}
-	if (source.length > MAX_SCHEMATIC_SOURCE_CHARACTERS) {
-		throw new SchematicSyntaxError('Schematic source exceeds the 131,072 character limit.');
-	}
 	const normalizedFence = normalizeParserFence(fence);
+	const limits = normalizedFence.limits;
+	if (source.length > limits.sourceCharacters) {
+		throw new SchematicSyntaxError(
+			`Schematic source exceeds the ${limits.sourceCharacters.toLocaleString('en-US')} character limit.`
+		);
+	}
 	const components: SchematicComponent[] = [];
 	const connections: SchematicConnection[] = [];
 	const componentIds = new Set<string>();
@@ -1828,8 +1807,11 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 		const lineNumber = lineIndex + 1;
 		const componentMatch = line.match(COMPONENT_PATTERN);
 		if (componentMatch) {
-			if (components.length >= MAX_SCHEMATIC_COMPONENTS) {
-				throw new SchematicSyntaxError('Schematic exceeds the 512 component limit.', lineNumber);
+			if (components.length >= limits.components) {
+				throw new SchematicSyntaxError(
+					`Schematic exceeds the ${limits.components.toLocaleString('en-US')} component limit.`,
+					lineNumber
+				);
 			}
 			const component = parseComponent(componentMatch, lineNumber);
 			if (componentIds.has(component.id)) {
@@ -1842,8 +1824,11 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 		}
 		const connectionMatch = line.match(CONNECTION_PATTERN);
 		if (connectionMatch) {
-			if (connections.length >= MAX_SCHEMATIC_CONNECTIONS) {
-				throw new SchematicSyntaxError('Schematic exceeds the 2,048 connection limit.', lineNumber);
+			if (connections.length >= limits.connections) {
+				throw new SchematicSyntaxError(
+					`Schematic exceeds the ${limits.connections.toLocaleString('en-US')} connection limit.`,
+					lineNumber
+				);
 			}
 			connections.push(parseConnection(connectionMatch, lineNumber));
 			continue;

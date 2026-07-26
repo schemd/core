@@ -1,11 +1,13 @@
 /**
- * Adversarial regression cover for five defects an audit found in 0.3.8.
+ * Adversarial cover for the five defects an audit found in 0.3.8, for the
+ * retired component and connection ceilings, and for the budget that replaced
+ * them.
  *
- * Each block states the defect, then pins the property that makes it impossible
- * rather than the incidental output that happened to change. Where the old
- * behaviour was *accepted by the suite* — a compound path carrying one arrowhead
- * for three wires, a transistor lead wired to itself — the assertion here is
- * deliberately the inverse of what shipped.
+ * Each block states the defect or the contract, then pins the property that
+ * makes it hold, rather than the incidental output that happened to change.
+ * Where the old behaviour was *accepted by the suite* — a compound path
+ * carrying one arrowhead for three wires, a transistor lead wired to itself —
+ * the assertion here is deliberately the inverse of what shipped.
  */
 import { describe, expect, test } from 'vitest';
 
@@ -17,11 +19,13 @@ import {
 	parseSchematic,
 	renderSchematic,
 	routeConnections,
+	SCHEMATIC_LIMITS,
 	SCHEMD_OUTPUT_MODES,
 	type SchematicComponent,
 	type SchematicConnection,
 	type SchematicDocument,
-	type SchematicFence
+	type SchematicFence,
+	type SchematicLimitOptions
 } from '../src/index.js';
 
 const fence: SchematicFence = { bounds: { width: 1000, height: 700 }, title: 'Regression fixture' };
@@ -388,6 +392,197 @@ U1.a -> P.in #blue [ortho]`,
 		)!;
 		expect(Number(traceX)).toBe(400 + 60);
 		expect(Number(traceY)).toBe(Number((350 + stubY).toFixed(3)));
+	});
+});
+
+describe('a document is not capped at a component count', () => {
+	/*
+	 * 512 components and 2,048 connections were arbitrary ceilings, and three
+	 * other limits stood behind them: a 4,096-unit canvas that could not hold a
+	 * thousand parts however many the parser allowed, a source-character cap that
+	 * ran out at roughly three thousand declarations, and a 2 MiB output cap.
+	 * Removing one without the others would have changed nothing a user could see.
+	 */
+	const grid = (count: number, wired: boolean) => {
+		const columns = Math.ceil(Math.sqrt(count * 1.6));
+		const lines: string[] = [];
+		for (let index = 0; index < count; index += 1) {
+			const x = 60 + (index % columns) * 110;
+			const y = 60 + Math.floor(index / columns) * 100;
+			lines.push(`resistor:R${index} "R" at (${x},${y}) #amber`);
+		}
+		if (wired) {
+			for (let index = 0; index + 1 < count; index += 2) {
+				if (Math.floor(index / columns) !== Math.floor((index + 1) / columns)) continue;
+				lines.push(`R${index}.out -> R${index + 1}.in #amber [ortho]`);
+			}
+		}
+		return {
+			source: lines.join('\n'),
+			bounds: {
+				width: 120 + columns * 110,
+				height: 160 + Math.ceil(count / columns) * 100
+			}
+		};
+	};
+
+	test.each([600, 2_000])('compiles %i components, past the old 512 ceiling', (count) => {
+		const { source, bounds } = grid(count, false);
+		const { document, svg } = compileSchematic(source, {
+			bounds,
+			title: 'Large document',
+			idPrefix: 'large'
+		});
+		expect(document.components).toHaveLength(count);
+		expect(svg.match(/class="schematic-component"/g)).toHaveLength(count);
+	});
+
+	test('compiles more connections than the old 2,048 ceiling', () => {
+		const { source, bounds } = grid(6_000, true);
+		const { document } = compileSchematic(source, {
+			bounds,
+			title: 'Large document',
+			idPrefix: 'large'
+		});
+		expect(document.connections.length).toBeGreaterThan(2_048);
+	});
+
+	test('accepts a canvas past the old 4,096-unit ceiling', () => {
+		const { document } = compileSchematic('resistor:R1 "R" at (5000,5000) #amber', {
+			bounds: { width: 10_000, height: 10_000 },
+			title: 'Wide canvas'
+		});
+		expect(document.components).toHaveLength(1);
+	});
+
+	test('keeps the spatial hash exact on a canvas no 4,096 stride would survive', () => {
+		/*
+		 * Cell keys are `column * stride + row`. The old stride assumed 64 cells per
+		 * axis; two traces this far apart would have collided into one bucket and
+		 * been compared as though they touched.
+		 */
+		const { svg } = compileSchematic(
+			`port:A "A" at (200,200) #blue
+port:B "B" at (60000,200) #blue
+port:C "C" at (200,60000) #cyan
+port:D "D" at (60000,60000) #cyan
+A.out -> B.in #blue [ortho]
+C.out -> D.in #cyan [ortho]`,
+			{ bounds: { width: 61_000, height: 61_000 }, title: 'Far apart', idPrefix: 'far' }
+		);
+		expect(svg.match(/schematic-trace/g)).toHaveLength(2);
+		expect(svg).not.toContain(' A ');
+	});
+
+	test.each([
+		['components', 3, /exceeds the 3 component limit/],
+		['connections', 2, /exceeds the 2 connection limit/],
+		['sourceCharacters', 40, /exceeds the 40 character limit/]
+	])('enforces a caller-supplied %s budget', (name, limit, message) => {
+		const source = `resistor:R0 "R" at (100,120) #amber
+resistor:R1 "R" at (300,120) #amber
+resistor:R2 "R" at (500,120) #amber
+resistor:R3 "R" at (700,120) #amber
+R0.out -> R1.in #amber [ortho]
+R1.out -> R2.in #amber [ortho]
+R2.out -> R3.in #amber [ortho]`;
+		expect(() => compileSchematic(source, { ...fence, limits: { [name]: limit } })).toThrow(
+			message
+		);
+		/* The same document with no budget is fine, so the limit did the rejecting. */
+		expect(() => compileSchematic(source, fence)).not.toThrow();
+	});
+
+	test('enforces a caller-supplied output byte budget', () => {
+		const source = 'resistor:R1 "R" at (300,300) #amber';
+		expect(() => compileSchematic(source, { ...fence, limits: { svgOutputBytes: 256 } })).toThrow(
+			/exceeds the 256 byte output limit/
+		);
+		expect(() =>
+			compileSchematic(source, { ...fence, limits: { svgOutputBytes: 268_435_456 } })
+		).not.toThrow();
+	});
+
+	test('enforces a caller-supplied wire-crossing budget', () => {
+		const source = `port:L0 "L" at (60,300) #blue
+port:R0 "R" at (900,300) #blue
+port:T0 "T" at (300,120) #cyan [orientation=down]
+port:B0 "B" at (300,560) #cyan [orientation=up]
+port:T1 "T" at (500,120) #cyan [orientation=down]
+port:B1 "B" at (500,560) #cyan [orientation=up]
+L0.out -> R0.in #blue [ortho]
+T0.out -> B0.in #cyan [ortho]
+T1.out -> B1.in #cyan [ortho]`;
+		expect(() => compileSchematic(source, { ...fence })).not.toThrow();
+		expect(() => compileSchematic(source, { ...fence, limits: { wireCrossings: 1 } })).toThrow(
+			/Wire crossing complexity exceeds 1 intersections/
+		);
+	});
+
+	test('rejects a malformed budget instead of ignoring it', () => {
+		const source = 'resistor:R1 "R" at (300,300) #amber';
+		for (const limits of [7, 'tight', null] as unknown[]) {
+			expect(() =>
+				compileSchematic(source, { ...fence, limits: limits as never })
+			).toThrow(/limits must be an object/);
+		}
+		/* A misspelled field is the dangerous case: silently ignoring it leaves a
+		   host believing it set a ceiling it never set. */
+		expect(() =>
+			compileSchematic(source, { ...fence, limits: { component: 4 } as never })
+		).toThrow(/Unknown compiler limit component\./);
+		for (const limit of [0, -1, 1.5, Number.NaN, '4', -Number.POSITIVE_INFINITY]) {
+			expect(() =>
+				compileSchematic(source, { ...fence, limits: { components: limit as never } })
+			).toThrow(/must be a positive integer or Infinity/);
+		}
+	});
+
+	test('reads Infinity as no limit, and omission as the default', () => {
+		const source = Array.from(
+			{ length: 40 },
+			(_, index) => `resistor:R${index} "R" at (${80 + (index % 8) * 110},${80 + Math.floor(index / 8) * 120}) #amber`
+		).join('\n');
+		const wide = { bounds: { width: 1000, height: 800 }, title: 'Budget' };
+		expect(() =>
+			compileSchematic(source, { ...wide, limits: { components: Number.POSITIVE_INFINITY } })
+		).not.toThrow();
+		expect(() => compileSchematic(source, { ...wide, limits: {} })).not.toThrow();
+		expect(() => compileSchematic(source, { ...wide, limits: { components: 39 } })).toThrow(
+			/39 component limit/
+		);
+	});
+
+	test('resolves a budget once, so a getter cannot move it between passes', () => {
+		/*
+		 * The same defence the fence's bounds and title get. A budget read where it
+		 * is enforced could be generous to the parser and mean to the renderer, or
+		 * the reverse, and the document would be validated against neither.
+		 */
+		let reads = 0;
+		const volatile = {
+			get components() {
+				reads += 1;
+				return reads === 1 ? 4 : 1;
+			}
+		} as unknown as SchematicLimitOptions;
+		const source = `resistor:R0 "R" at (100,120) #amber
+resistor:R1 "R" at (300,120) #amber`;
+		expect(() => compileSchematic(source, { ...fence, limits: volatile })).not.toThrow();
+		expect(reads).toBe(1);
+	});
+
+	test('defaults to no component or connection ceiling at all', () => {
+		expect(SCHEMATIC_LIMITS).toEqual({
+			minimumBound: 64,
+			maximumBound: 1_048_576,
+			components: Number.POSITIVE_INFINITY,
+			connections: Number.POSITIVE_INFINITY,
+			sourceCharacters: 16_777_216,
+			wireCrossings: 32_768,
+			svgOutputBytes: 268_435_456
+		});
+		expect(Object.isFrozen(SCHEMATIC_LIMITS)).toBe(true);
 	});
 });
 

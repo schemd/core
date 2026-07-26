@@ -1,5 +1,5 @@
 /** One-pass compiler facade for hosts that do not need the parser and renderer separately. */
-import { utf8ByteLength } from './limits.js';
+import { resolveSchematicLimits, utf8ByteLength } from './limits.js';
 import { assertParsedSchematicDocument, parseSchematic } from './parser.js';
 import { renderSchematic } from './renderer.js';
 import type { CompileSchematicOptions, SchematicDocument } from './types.js';
@@ -82,8 +82,18 @@ export function schematicSourceMap(document: SchematicDocument): SchematicSource
 
 /** Parse and render a schematic with one stable public call. */
 export function compileSchematic(source: string, options: CompileSchematicOptions): SchematicCompilation {
-	const document = parseSchematic(source, options);
-	const svg = renderSchematic(document, options);
+	/*
+	 * Snapshot the caller's options once and hand the same copy to both passes.
+	 * Read live, an accessor could give the parser one budget or canvas and the
+	 * renderer another, and the document would be validated against neither.
+	 */
+	const settled: CompileSchematicOptions = {
+		...options,
+		bounds: { ...options.bounds },
+		limits: resolveSchematicLimits(options.limits)
+	};
+	const document = parseSchematic(source, settled);
+	const svg = renderSchematic(document, settled);
 	return {
 		document,
 		svg,

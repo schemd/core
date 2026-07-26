@@ -28,7 +28,14 @@ import {
 	type IcPinSide,
 	type RoutedConnection
 } from './layout.js';
-import { MAX_SCHEMATIC_SVG_OUTPUT_BYTES, utf8ByteLength } from './limits.js';
+import {
+	MAX_SCHEMATIC_SVG_OUTPUT_BYTES,
+	normalizeSchematicBounds,
+	normalizeSchematicTitle,
+	resolveSchematicLimits,
+	utf8ByteLength,
+	type SchematicResolvedLimits
+} from './limits.js';
 import { assertParsedSchematicDocument } from './parser.js';
 import { parsedSchematicRoutes } from './route-cache.js';
 import {
@@ -91,6 +98,8 @@ interface NormalizedCompileOptions extends CompileSchematicOptions {
 	mode: SchemdOutputMode;
 	/** Constant-time full-mode hook lookup. */
 	semanticHookMask: number;
+	/** Budget resolved once, so no pass re-reads a caller's getters. */
+	limits: SchematicResolvedLimits;
 }
 
 /** Shared static text paint: solid glyphs that never inherit the vector stroke. */
@@ -123,6 +132,18 @@ export class BoundedSvgWriter {
 	readonly #chunks: string[] = [];
 	/** Running exact UTF-8 byte count for appended fragments. */
 	#bytes = 0;
+	/** Ceiling this writer enforces, in UTF-8 bytes. */
+	readonly #limit: number;
+
+	/**
+	 * @param limitBytes - Output ceiling. The default is the compiler's own, and
+	 *   is large enough that a caller reaches it only by generating markup no
+	 *   host could hold; a smaller one lets the boundary be exercised without
+	 *   allocating it.
+	 */
+	constructor(limitBytes: number = MAX_SCHEMATIC_SVG_OUTPUT_BYTES) {
+		this.#limit = limitBytes;
+	}
 
 	/**
 	 * Add one trusted SVG fragment within the hard output budget.
@@ -132,9 +153,9 @@ export class BoundedSvgWriter {
 	 */
 	append(chunk: string): void {
 		const nextBytes = this.#bytes + utf8ByteLength(chunk);
-		if (nextBytes > MAX_SCHEMATIC_SVG_OUTPUT_BYTES) {
+		if (nextBytes > this.#limit) {
 			throw new SchematicSyntaxError(
-				`Compiled SVG exceeds the ${MAX_SCHEMATIC_SVG_OUTPUT_BYTES.toLocaleString('en-US')} byte output limit.`
+				`Compiled SVG exceeds the ${this.#limit.toLocaleString('en-US')} byte output limit.`
 			);
 		}
 		this.#bytes = nextBytes;
@@ -170,27 +191,9 @@ function normalizeCompileOptions(value: unknown): NormalizedCompileOptions {
 	if (typeof rawBounds !== 'object' || rawBounds === null) {
 		throw new SchematicSyntaxError('Render options require bounds.');
 	}
-	const bounds = rawBounds as Record<string, unknown>;
-	const width = bounds.width;
-	const height = bounds.height;
-	if (
-		typeof width !== 'number' ||
-		!Number.isInteger(width) ||
-		typeof height !== 'number' ||
-		!Number.isInteger(height) ||
-		width < 64 ||
-		height < 64 ||
-		width > 4096 ||
-		height > 4096
-	) {
-		throw new SchematicSyntaxError('Render bounds must be integers from 64 through 4096.');
-	}
-	const title = candidate.title;
-	if (typeof title !== 'string' || title.trim() === '' || title.length > 512) {
-		throw new SchematicSyntaxError(
-			'Render title must be a non-empty string of at most 512 characters.'
-		);
-	}
+	const rawFields = rawBounds as Record<string, unknown>;
+	const bounds = normalizeSchematicBounds(rawFields.width, rawFields.height, 'Render');
+	const title = normalizeSchematicTitle(candidate.title, 'Render');
 	const idPrefix = candidate.idPrefix;
 	if (idPrefix !== undefined && (typeof idPrefix !== 'string' || idPrefix.length > 128)) {
 		throw new SchematicSyntaxError('Render idPrefix must be a string of at most 128 characters.');
@@ -222,9 +225,10 @@ function normalizeCompileOptions(value: unknown): NormalizedCompileOptions {
 			semanticHookMask |= semanticHookBit(hook as SchematicSemanticHook);
 		}
 	}
+	const limits = resolveSchematicLimits(candidate.limits);
 	return idPrefix === undefined
-		? { bounds: { width, height }, title, mode: normalizedMode, semanticHookMask }
-		: { bounds: { width, height }, title, idPrefix, mode: normalizedMode, semanticHookMask };
+		? { bounds, title, mode: normalizedMode, semanticHookMask, limits }
+		: { bounds, title, idPrefix, mode: normalizedMode, semanticHookMask, limits };
 }
 
 /**
@@ -1409,7 +1413,8 @@ export function renderSchematic(
 			routeConnections(
 				document.connections,
 				new Map(document.components.map((component) => [component.id, component])),
-				normalized.bounds
+				normalized.bounds,
+				normalized.limits.wireCrossings
 			)
 		);
 	/* Hashing serializes the entire AST, so the signature exists only when no idPrefix is supplied. */
@@ -1445,7 +1450,7 @@ export function renderSchematic(
 	const title = escapeXml(normalized.title);
 	const componentCount = document.components.length;
 	const description = `${componentCount} component${componentCount === 1 ? '' : 's'} and ${document.connections.length} connection${document.connections.length === 1 ? '' : 's'}.`;
-	const writer = new BoundedSvgWriter();
+	const writer = new BoundedSvgWriter(normalized.limits.svgOutputBytes);
 	const hookStyles = portHooks ? HOOK_SVG_STYLES : '';
 	const interactionStyles = styles ? INTERACTIVE_SVG_STYLES : '';
 	const glowFilter = styles

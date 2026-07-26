@@ -21,13 +21,13 @@ const BUDGETS = [
 		module: '../src/compiler.ts',
 		entry: (path) =>
 			`import { compileSchematic } from ${JSON.stringify(path)};globalThis.schemdCompile=compileSchematic;`,
-		maxGzipBytes: 31 * 1024
+		maxGzipBytes: 32 * 1024
 	},
 	{
 		label: 'Package bundle (every public export)',
 		module: '../src/index.ts',
 		entry: (path) => `import * as schemd from ${JSON.stringify(path)};globalThis.schemd=schemd;`,
-		maxGzipBytes: 34 * 1024
+		maxGzipBytes: 35 * 1024
 	}
 ];
 
