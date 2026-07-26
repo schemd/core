@@ -1,6 +1,6 @@
 {
   "name": "@schemd/core",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Zero-dependency text-to-SVG compiler for schematics and UML.",
   "homepage": "https://schemd.johnowolabiidogun.dev",
   "bugs": {
@@ -45,6 +45,14 @@
     "./layout": {
       "types": "./dist/layout.d.ts",
       "import": "./dist/layout.js"
+    },
+    "./netlist": {
+      "types": "./dist/netlist.d.ts",
+      "import": "./dist/netlist.js"
+    },
+    "./describe": {
+      "types": "./dist/describe.d.ts",
+      "import": "./dist/describe.js"
     },
     "./math-label": {
       "types": "./dist/math-label.d.ts",

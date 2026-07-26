@@ -2,7 +2,17 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
-## [0.3.6] - Unreleased
+## [0.3.7] - 07/25/2026
+
+### Fixed
+
+- `@schemd/core/netlist` and `@schemd/core/describe` are importable. Both modules shipped in the tarball with no entry in the package `exports` map, so `import '@schemd/core/netlist'` failed with `ERR_PACKAGE_PATH_NOT_EXPORTED` while `dist/netlist.js` sat there unused — the netlist subpath since it was announced in 0.3.4, the describe subpath since 0.3.6. Nothing caught either, because every test imports from `src`, where subpaths do not exist.
+
+### Verified
+
+- A packaging test now decides, in one place, which source modules are public: every one of them must have a subpath, every subpath must resolve to the module it names, and no subpath may point at a module that is not there. Removing an entry fails the suite.
+
+## [0.3.6] - 07/25/2026
 
 ### Added
 
