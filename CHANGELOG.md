@@ -2,7 +2,7 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
-## [Unreleased]
+## [0.4.0] - 07/26/2026
 
 ### Fixed
 
