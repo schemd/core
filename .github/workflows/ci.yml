@@ -69,7 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
+      # `contents: write` cuts the GitHub Release; `id-token` is npm trusted publishing.
+      contents: write
       id-token: write
     steps:
       - name: Checkout repository
@@ -107,3 +108,25 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --access public
+
+      # The changelog section for this tag becomes the release body, so the
+      # prose is written once. Downstream consumers — the website's release
+      # snapshot among them — read it from the API instead of copying it.
+      - name: Extract release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            node scripts/changelog-section.mjs "$GITHUB_REF_NAME"
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.body }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: false
