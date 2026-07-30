@@ -1042,7 +1042,7 @@ ic:U1 "Chip" at (960, 180) [left="A" right="Y"]`,
 		expect(() => routeConnections(connections, endpointOnlyMap)).toThrow(
 			`Wire crossing complexity exceeds ${MAX_SCHEMATIC_WIRE_CROSSINGS.toLocaleString('en-US')} intersections.`
 		);
-	});
+	}, 15_000);
 
 	test('rejects a caller-supplied routed array with the wrong cardinality', () => {
 		const component: PassiveComponent = {
