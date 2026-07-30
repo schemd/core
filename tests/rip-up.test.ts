@@ -127,40 +127,45 @@ describe('the ceiling that remains', () => {
 });
 
 describe('determinism', () => {
+	/*
+	 * Ten wires is the cheapest document that reaches the retry path at all —
+	 * nine routes on the first pass, and every wider bus costs multiples more per
+	 * compile. Entering the path is what these two measure, so the cheapest one
+	 * that does is the right fixture.
+	 */
+	const CONGESTED = crossbar(10);
+
 	test(
-		'a congested document compiles to one distinct output over 1,000 runs',
+		'a congested document compiles to one distinct output on every run',
 		() => {
 			/*
-			 * Eleven wires rather than twelve: both reach the retry path, which is what
-			 * this measures, and eleven settles in two passes where twelve takes seven —
-			 * a thousand runs of the wider bus is thirty-odd seconds of routing to prove
-			 * the same property. The explicit timeout is still generous, because a
-			 * thousand real compilations is the point and quietly shrinking the loop
-			 * would leave the assertion looking stronger than it is.
+			 * 250 repetitions, not the thousand this started as. A thousand in-process
+			 * compilations took over two minutes under coverage on CI, and the extra
+			 * 750 bought nothing: every source of nondeterminism available to this code
+			 * — a clock, `Math.random`, a scored permutation, iteration over an
+			 * unordered container — diverges on the second run, not the eight hundredth.
+			 * What a thousand in-process runs cannot test is the case that actually
+			 * varies, which is a different process on a different platform; CI covers
+			 * that by compiling the same goldens on Linux that were written on macOS.
 			 */
-			const source = crossbar(11);
-			const first = compileSchematic(source, fence);
+			const first = compileSchematic(CONGESTED, fence);
 			expect(first.routing.attempts).toBeGreaterThan(0);
 			const outputs = new Set<string>();
-			for (let run = 0; run < 1_000; run += 1) {
-				outputs.add(compileSchematic(source, fence).svg);
+			for (let run = 0; run < 250; run += 1) {
+				outputs.add(compileSchematic(CONGESTED, fence).svg);
 			}
 			expect(outputs.size).toBe(1);
 			expect([...outputs][0]).toBe(first.svg);
 		},
-		120_000
+		60_000
 	);
 
 	test(
 		'the report itself is stable across runs',
 		() => {
-			/* Eleven wires and an explicit budget for the same reason as above, with
-			   headroom for the coverage run, where instrumentation roughly triples the
-			   cost of every routing pass. */
-			const source = crossbar(11);
 			const reports = new Set<string>();
 			for (let run = 0; run < 50; run += 1) {
-				reports.add(JSON.stringify(compileSchematic(source, fence).routing));
+				reports.add(JSON.stringify(compileSchematic(CONGESTED, fence).routing));
 			}
 			expect(reports.size).toBe(1);
 		},
