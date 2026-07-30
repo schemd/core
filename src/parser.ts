@@ -63,6 +63,7 @@ import {
 	type SchematicSignalKind,
 	type SchematicRelationKind,
 	type SchematicOrientation,
+	type SchematicPlacementRelation,
 	type TransistorComponent,
 	type UmlClassComponent,
 	type UmlSizedComponent,
@@ -73,10 +74,11 @@ import {
 	isClassicalGate,
 	isDigitalComponent,
 	isQuantumSpecial,
-	validateDocumentGeometry
+	validateSchematicGeometry
 } from './layout.js';
 import { mathLabelTextWidth } from './math-label.js';
-import { cacheParsedSchematicRoutes } from './route-cache.js';
+import { resolvePlacements, type PendingPlacement } from './placement.js';
+import { cacheParsedSchematicEvidence, cacheParsedSchematicRoutes } from './route-cache.js';
 import {
 	normalizeSchematicBounds,
 	normalizeSchematicTitle,
@@ -87,6 +89,25 @@ import {
 /** Lexical shape of a complete component declaration line. */
 const COMPONENT_PATTERN =
 	/^([A-Za-z][A-Za-z0-9_-]*):([A-Za-z][A-Za-z0-9_-]*)\s+"([^"]+)"\s+at\s+\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)\s+(.+)$/;
+/**
+ * Lexical shape of a declaration whose position is stated by relation.
+ *
+ * Deliberately a second pattern rather than an alternation inside
+ * {@link COMPONENT_PATTERN}: the absolute form is matched first and unchanged, so
+ * every existing document takes byte-for-byte the same path through the parser
+ * and every existing diagnostic keeps its exact wording and order. The placement
+ * clause is then consumed relation by relation with the two anchored patterns
+ * below, which is also why it is not one large alternation — a repeated
+ * alternation over an unanchored tail is how a lexer acquires backtracking risk.
+ */
+const COMPONENT_HEAD_PATTERN =
+	/^([A-Za-z][A-Za-z0-9_-]*):([A-Za-z][A-Za-z0-9_-]*)\s+"([^"]+)"\s+(.+)$/;
+/** One directional relation, anchored so each match consumes a bounded prefix. */
+const PLACEMENT_DIRECTION_PATTERN =
+	/^(right-of|left-of|above|below)\s+([A-Za-z][A-Za-z0-9_-]*)(?:\.([A-Za-z][A-Za-z0-9_+-]*))?(?:\s+by\s+(-?\d+(?:\.\d+)?))?(?:\s+|$)/;
+/** One axis alignment, anchored on the same terms. */
+const PLACEMENT_ALIGNMENT_PATTERN =
+	/^(aligned-x|aligned-y)\s+with\s+([A-Za-z][A-Za-z0-9_-]*)(?:\.([A-Za-z][A-Za-z0-9_+-]*))?(?:\s+|$)/;
 /** Lexical shape of a directed connection declaration line. */
 const CONNECTION_PATTERN =
 	/^([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9_+-]*)\s*->\s*([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9_+-]*)\s+(.+)$/;
@@ -688,40 +709,64 @@ function widestUmlRow(rows: readonly string[]): number {
 }
 
 /**
+ * One lexed component declaration, with its position already decided.
+ *
+ * Both position forms produce this record: the absolute form reads its
+ * coordinates straight out of the line, and the relative form supplies a
+ * placeholder that {@link resolvePlacements} overwrites before the document is
+ * finished. Everything downstream of this record is therefore identical for the
+ * two forms by construction, rather than by two code paths agreeing.
+ */
+interface ComponentDeclaration {
+	/** Raw kind token, before validation against `COMPONENT_KINDS`. */
+	readonly kind: string;
+	/** Document-unique identifier. */
+	readonly id: string;
+	/** Human-readable label, possibly containing micro-math syntax. */
+	readonly label: string;
+	/** Horizontal coordinate, or `0` awaiting placement resolution. */
+	readonly x: number;
+	/** Vertical coordinate, or `0` awaiting placement resolution. */
+	readonly y: number;
+	/** Colour token and bracketed options, unparsed. */
+	readonly tail: string;
+}
+
+/**
  * Extract and sanitize fields shared by every component AST node.
  *
- * @param match - Match produced by {@link COMPONENT_PATTERN}.
+ * @param declaration - Lexed declaration carrying identity and coordinates.
  * @param color - Raw color token selected for the component.
  * @param line - One-based source line.
  * @returns Shared component identity, coordinates, label, color, and location.
  */
-function commonComponent(match: RegExpMatchArray, color: string, line: number) {
+function commonComponent(declaration: ComponentDeclaration, color: string, line: number) {
 	return {
-		id: match[2]!,
-		label: match[3]!,
-		x: Number(match[4]!),
-		y: Number(match[5]!),
+		id: declaration.id,
+		label: declaration.label,
+		x: declaration.x,
+		y: declaration.y,
 		color: parseSchematicColor(color, line),
 		line
 	};
 }
 
 /**
- * Convert one lexically matched component declaration into its discriminated AST node.
+ * Convert one lexed component declaration into its discriminated AST node.
  *
- * @param match - Complete match from {@link COMPONENT_PATTERN}.
+ * @param declaration - Lexed declaration from either position form.
  * @param line - One-based source line for diagnostics and AST provenance.
  * @returns Fully validated component node with kind-specific defaults applied.
  */
-function parseComponent(match: RegExpMatchArray, line: number): SchematicComponent {
-	const rawKind = match[1]!.toLowerCase();
+function parseComponent(declaration: ComponentDeclaration, line: number): SchematicComponent {
+	const rawKind = declaration.kind.toLowerCase();
 	if (!includesValue(COMPONENT_KINDS, rawKind)) {
-		throw new SchematicSyntaxError(`Unsupported component kind ${match[1]!}.`, line);
+		throw new SchematicSyntaxError(`Unsupported component kind ${declaration.kind}.`, line);
 	}
 	const kind: ComponentKind = rawKind;
-	const tail = splitDeclarationTail(match[6]!, line, kind === 'ic');
+	const tail = splitDeclarationTail(declaration.tail, line, kind === 'ic');
 	const attributes = parseAttributes(tail.options, line);
-	const common = commonComponent(match, tail.color === '' ? 'slate' : tail.color, line);
+	const common = commonComponent(declaration, tail.color === '' ? 'slate' : tail.color, line);
 	if (includesValue(PASSIVE_KINDS, kind)) {
 		assertOnlyAttributes(attributes, ['type', 'orientation'], line);
 		const allowed =
@@ -1778,6 +1823,52 @@ export function parseSchematicFence(
 }
 
 /**
+ * Consume a placement clause from the front of a declaration's remainder.
+ *
+ * Each pattern is anchored and matches a bounded prefix, so the loop advances
+ * monotonically and cannot backtrack: N relations cost N matches. Whatever the
+ * loop does not consume is the colour-and-options tail, handed on unchanged.
+ *
+ * A line with no leading relation returns no relations, which is how the caller
+ * distinguishes "relative declaration" from "a line this parser cannot read" —
+ * and why the absolute form must be tried first.
+ *
+ * @param rest - Everything after the quoted label.
+ * @returns Parsed relations in reading order and the unconsumed tail.
+ */
+function parsePlacementClause(rest: string): {
+	readonly relations: SchematicPlacementRelation[];
+	readonly tail: string;
+} {
+	const relations: SchematicPlacementRelation[] = [];
+	let cursor = rest;
+	for (;;) {
+		const direction = cursor.match(PLACEMENT_DIRECTION_PATTERN);
+		if (direction !== null) {
+			relations.push({
+				kind: direction[1] as SchematicPlacementRelation['kind'],
+				ref: direction[2]!,
+				...(direction[3] === undefined ? {} : { port: direction[3] }),
+				...(direction[4] === undefined ? {} : { gap: Number(direction[4]) })
+			});
+			cursor = cursor.slice(direction[0]!.length);
+			continue;
+		}
+		const alignment = cursor.match(PLACEMENT_ALIGNMENT_PATTERN);
+		if (alignment !== null) {
+			relations.push({
+				kind: alignment[1] as SchematicPlacementRelation['kind'],
+				ref: alignment[2]!,
+				...(alignment[3] === undefined ? {} : { port: alignment[3] })
+			});
+			cursor = cursor.slice(alignment[0]!.length);
+			continue;
+		}
+		return { relations, tail: cursor };
+	}
+}
+
+/**
  * Compile validated schemd DSL source into an immutable schematic AST.
  *
  * @param source - Diagram declarations excluding the surrounding Markdown fence.
@@ -1801,6 +1892,7 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 	const components: SchematicComponent[] = [];
 	const connections: SchematicConnection[] = [];
 	const componentIds = new Set<string>();
+	const pendingPlacements: PendingPlacement[] = [];
 	for (const [lineIndex, rawLine] of source.replace(/\r\n?/g, '\n').split('\n').entries()) {
 		const line = rawLine.trim();
 		if (line === '' || line.startsWith('//')) continue;
@@ -1813,7 +1905,17 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 					lineNumber
 				);
 			}
-			const component = parseComponent(componentMatch, lineNumber);
+			const component = parseComponent(
+				{
+					kind: componentMatch[1]!,
+					id: componentMatch[2]!,
+					label: componentMatch[3]!,
+					x: Number(componentMatch[4]!),
+					y: Number(componentMatch[5]!),
+					tail: componentMatch[6]!
+				},
+				lineNumber
+			);
 			if (componentIds.has(component.id)) {
 				throw new SchematicSyntaxError(`Duplicate component ID ${component.id}.`, lineNumber);
 			}
@@ -1821,6 +1923,43 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 			componentIds.add(component.id);
 			components.push(component);
 			continue;
+		}
+		/*
+		 * Only reached when the absolute form did not match, so a relative
+		 * declaration is the second thing tried and an unreadable line is still the
+		 * last. Bounds validation is deferred for these: coordinates do not exist
+		 * until every declaration has been lexed, because a relation may reference a
+		 * component declared later in the document.
+		 */
+		const headMatch = line.match(COMPONENT_HEAD_PATTERN);
+		if (headMatch) {
+			const placement = parsePlacementClause(headMatch[4]!);
+			if (placement.relations.length > 0 && placement.tail !== '') {
+				if (components.length >= limits.components) {
+					throw new SchematicSyntaxError(
+						`Schematic exceeds the ${limits.components.toLocaleString('en-US')} component limit.`,
+						lineNumber
+					);
+				}
+				const component = parseComponent(
+					{
+						kind: headMatch[1]!,
+						id: headMatch[2]!,
+						label: headMatch[3]!,
+						x: 0,
+						y: 0,
+						tail: placement.tail
+					},
+					lineNumber
+				);
+				if (componentIds.has(component.id)) {
+					throw new SchematicSyntaxError(`Duplicate component ID ${component.id}.`, lineNumber);
+				}
+				componentIds.add(component.id);
+				components.push(component);
+				pendingPlacements.push({ component, relations: placement.relations });
+				continue;
+			}
 		}
 		const connectionMatch = line.match(CONNECTION_PATTERN);
 		if (connectionMatch) {
@@ -1838,6 +1977,22 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 	if (components.length === 0) {
 		throw new SchematicSyntaxError('A schematic must declare at least one component.');
 	}
+	/*
+	 * Lowering happens here, between lexing and the rest of the AST work, because
+	 * a relation may reference a declaration further down the document and no
+	 * coordinate is knowable until every line has been read. Bounds validation for
+	 * these components was deferred out of the loop above for the same reason, and
+	 * runs immediately below against the coordinates the pass just assigned — so a
+	 * relation that lands a part off-canvas reaches the same diagnostic a bad
+	 * `at (x, y)` would.
+	 */
+	const placements =
+		pendingPlacements.length === 0
+			? []
+			: resolvePlacements(components, pendingPlacements, limits.placementDepth);
+	for (const pending of pendingPlacements) {
+		validateComponent(pending.component, normalizedFence);
+	}
 	const componentsById = new Map(components.map((component) => [component.id, component]));
 	for (const connection of connections) {
 		validateEndpoint(connection.from, componentsById, connection.line);
@@ -1847,8 +2002,9 @@ export function parseSchematic(source: string, fence: SchematicFence): Schematic
 	}
 	assignConnectionNetIds(connections);
 	const document = { components, connections } satisfies SchematicDocument;
-	const routes = validateDocumentGeometry(document, normalizedFence);
+	const geometry = validateSchematicGeometry(document, normalizedFence);
 	const parsedDocument = freezeParsedDocument(document);
-	cacheParsedSchematicRoutes(parsedDocument, normalizedFence.bounds, routes);
+	cacheParsedSchematicRoutes(parsedDocument, normalizedFence.bounds, geometry.routes);
+	cacheParsedSchematicEvidence(parsedDocument, placements, geometry.report);
 	return parsedDocument;
 }

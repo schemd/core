@@ -16,6 +16,7 @@ Want to help? Open the claim link before starting a large change so work is not 
 ## Now · visual precision
 
 - [ ] **P1-09 · Publish a deterministic typography contract.** Done when supported font behavior is explicit and long UML rows wrap or fail clearly instead of spilling or distorting. [Claim P1-09](https://github.com/schemd/core/issues/new?template=roadmap.yml&title=%5BROADMAP%5D%20P1-09%20%E2%80%94%20Deterministic%20typography)
+- [ ] **P1-10 · Raise the router's channel ceiling.** 0.5 added rip-up, which takes a full reversal bus from ten wires to twelve. Thirteen is unreachable *by any declaration order* — measured, not assumed: widening the fence changes nothing and twenty thousand random orders were searched without a success — so the remaining limit is the channel model itself, not the order traces are placed in. Done when a reversal bus scales with the room available rather than stopping at a fixed width, with the new ceiling stated and pinned. [Claim P1-10](https://github.com/schemd/core/issues/new?template=roadmap.yml&title=%5BROADMAP%5D%20P1-10%20%E2%80%94%20Router%20channel%20ceiling)
 
 ## Next · language and footprint
 

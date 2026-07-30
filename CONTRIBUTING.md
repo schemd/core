@@ -96,10 +96,10 @@ much easier to tell whether your change should be updating it.
 | Command | Protects | In CI |
 | --- | --- | --- |
 | `bun run check` | Types across the whole repo, tests included | yes |
-| `bun run test` | Behaviour; 18 suites under `tests/` | via coverage |
+| `bun run test` | Behaviour; 20 suites under `tests/` | via coverage |
 | `bun run test:coverage` | 100% on all four axes | yes |
 | `bun run test:fuzz` | Bounded deterministic fuzzing — no hang, no unhandled throw | via `test` |
-| `bun run test:mutation` | 14 named mutants, all of which must be killed | yes |
+| `bun run test:mutation` | 24 named mutants, all of which must be killed | yes |
 | `bun run test:visual` | Chromium pixel goldens under `tests/visual/goldens` | yes |
 | `bun run size` | Both gzip budgets | yes |
 | `node scripts/benchmark.mjs` | Latency ceilings and per-component scaling | no — local and release only |
@@ -119,7 +119,7 @@ green. If you find yourself adding a test purely to reach a line, ask whether th
 
 ### The mutation gate
 
-`scripts/mutation.mjs` holds a list of named mutants. Each is a precise source substitution paired
+`scripts/mutation.mjs` holds a list of named mutants (24 of them). Each is a precise source substitution paired
 with the test files that must fail when it is applied. Every one must be killed.
 
 A mutant is stated as a *property*, not as an edit:
@@ -154,6 +154,18 @@ the existing ones accidentally share, and cover that instead of adding another i
 shape.**
 
 Update a golden only when you intend the visual change, and say so in the changelog.
+
+### Rip-up can hide a router defect — assert how hard it was
+
+Since 0.5 the router retries around a trace it cannot place. That is the feature, and it is also a
+new way for a test to stop protecting anything. A fixture asserting only that a diagram *compiles*
+will keep passing while the reservation of terminal approaches, the channel-lane offer, or the
+contact pricing regresses, because the retry loop quietly absorbs the failure.
+
+This is not hypothetical: adding rip-up caused the 0.4.0 mutant `terminal approaches are reserved
+before any wire is placed` to survive, and the fix was to strengthen the test rather than retire the
+mutant. **If a fixture is an ordinary figure, assert `routing.attempts === 0` alongside whatever else
+it checks.** Needing a retry is itself a fact worth pinning.
 
 ---
 

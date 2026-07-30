@@ -299,6 +299,10 @@ export interface SchematicLimitOptions {
 	readonly wireCrossings?: number;
 	/** Maximum UTF-8 bytes of generated markup. */
 	readonly svgOutputBytes?: number;
+	/** Longest chain of relative placements resolved in one document. */
+	readonly placementDepth?: number;
+	/** Maximum routing passes; `1` disables rip-up retries. */
+	readonly routingAttempts?: number;
 }
 
 /** Validated metadata parsed from a fenced `schemd` declaration. */
@@ -317,6 +321,37 @@ export interface SchematicPoint {
 	x: number;
 	/** Vertical coordinate. */
 	y: number;
+}
+
+/**
+ * Placement relations a declaration may state instead of absolute coordinates.
+ *
+ * The four directions position one edge against another and accept an optional
+ * `by` gap; the two alignments copy a single axis and take no gap. Both forms
+ * lower to an `at (x, y)` the compiler resolves before anything downstream runs,
+ * so nothing past the parser can observe which form an author wrote.
+ */
+export const SCHEMATIC_PLACEMENT_KINDS = [
+	'right-of',
+	'left-of',
+	'above',
+	'below',
+	'aligned-x',
+	'aligned-y'
+] as const;
+/** One relation in a declaration's placement clause. */
+export type SchematicPlacementKind = (typeof SCHEMATIC_PLACEMENT_KINDS)[number];
+
+/** A single relative-placement constraint against one other declaration. */
+export interface SchematicPlacementRelation {
+	/** Which edge or axis this relation constrains. */
+	readonly kind: SchematicPlacementKind;
+	/** Document-unique id of the component this relation is measured from. */
+	readonly ref: string;
+	/** Canonical terminal, when the author wrote `id.port` rather than `id`. */
+	readonly port?: string;
+	/** Author-supplied `by` distance; absence means the axis default. */
+	readonly gap?: number;
 }
 
 /** Author-facing quarter-turn orientations for direction-sensitive components. */

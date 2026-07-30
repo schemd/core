@@ -152,13 +152,23 @@ describe('orthogonal routing completes a reversal bus', () => {
 	 */
 	test.each([2, 3, 4, 6, 8])('compiles a %i-wire reversal on an open canvas', (count) => {
 		const bounds = { width: 1000, height: 200 + count * 120 };
-		const { document, svg } = compileSchematic(crossbar(count), {
+		const { document, svg, routing } = compileSchematic(crossbar(count), {
 			bounds,
 			title: 'Reversal bus',
 			idPrefix: `bus-${count}`
 		});
 		expect(document.connections).toHaveLength(count);
 		expect(svg).not.toContain('NaN');
+		/*
+		 * On the *first pass*, and this clause is load-bearing. 0.5 added rip-up,
+		 * which retries around a trace that cannot be placed — and in doing so it can
+		 * paper over a router defect that used to fail loudly here. Asserting only
+		 * that these compile would let the reservation of terminal approaches, the
+		 * channel-lane offer, and the contact pricing all regress silently, with the
+		 * retry loop quietly absorbing the cost. A bus this size is an ordinary
+		 * figure and must not need a retry.
+		 */
+		expect(routing.attempts).toBe(0);
 	});
 
 	test('lays every trace of a reversal bus in its own channel', () => {
@@ -580,7 +590,9 @@ resistor:R1 "R" at (300,120) #amber`;
 			connections: Number.POSITIVE_INFINITY,
 			sourceCharacters: 16_777_216,
 			wireCrossings: 32_768,
-			svgOutputBytes: 268_435_456
+			svgOutputBytes: 268_435_456,
+			placementDepth: 64,
+			routingAttempts: 12
 		});
 		expect(Object.isFrozen(SCHEMATIC_LIMITS)).toBe(true);
 	});

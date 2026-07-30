@@ -17,6 +17,13 @@ export {
 	type SchematicWireSource
 } from './compiler.js';
 export {
+	resolvePlacements,
+	PLACEMENT_HORIZONTAL_GAP,
+	PLACEMENT_VERTICAL_GAP,
+	type PendingPlacement,
+	type SchematicPlacement
+} from './placement.js';
+export {
 	buildNetlist,
 	inspectSchematic,
 	verifyNetlist,
@@ -44,6 +51,8 @@ export {
 	MAX_SCHEMATIC_BOUND,
 	MAX_SCHEMATIC_WIRE_CROSSINGS,
 	MIN_SCHEMATIC_BOUND,
+	MAX_SCHEMATIC_PLACEMENT_DEPTH,
+	MAX_SCHEMATIC_ROUTING_ATTEMPTS,
 	MAX_SCHEMATIC_SOURCE_CHARACTERS,
 	MAX_SCHEMATIC_SVG_OUTPUT_BYTES,
 	resolveSchematicLimits,
@@ -72,9 +81,14 @@ export {
 	rotateQuarterPoint,
 	routeConnections,
 	routeConnection,
+	routeSchematicConnections,
 	SCHEMATIC_BRIDGE_RADIUS,
+	SCHEMATIC_CONGESTION_CELL_SIZE,
 	SCHEMATIC_OBSTACLE_CLEARANCE,
 	validateDocumentGeometry,
+	validateSchematicGeometry,
+	type SchematicCongestionCell,
+	type SchematicRoutingReport,
 	type RoutedConnection,
 	type ComponentTextAnchors,
 	type ComponentPort,
@@ -108,6 +122,7 @@ export {
 	QUANTUM_SPECIAL_KINDS,
 	RESONATOR_TYPES,
 	SCHEMATIC_ORIENTATIONS,
+	SCHEMATIC_PLACEMENT_KINDS,
 	SCHEMATIC_SIGNAL_KINDS,
 	SCHEMATIC_SIGNAL_MARKERS,
 	SEMANTIC_COLORS,
@@ -162,6 +177,8 @@ export {
 	type SchematicFence,
 	type SchematicLimitOptions,
 	type SchematicOrientation,
+	type SchematicPlacementKind,
+	type SchematicPlacementRelation,
 	type SchematicSignalMarker,
 	type SchematicSemanticHook,
 	type SchematicPoint,

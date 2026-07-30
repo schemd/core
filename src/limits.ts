@@ -33,6 +33,30 @@ export const MAX_SCHEMATIC_BOUND = 1_048_576;
 export const MAX_SCHEMATIC_SOURCE_CHARACTERS = 16_777_216;
 /** Maximum rendered orthogonal intersections before the crossing pass aborts. */
 export const MAX_SCHEMATIC_WIRE_CROSSINGS = 32_768;
+/**
+ * Longest chain of relative placements resolved in one document.
+ *
+ * A component placed relative to a component placed relative to a component is
+ * two deep. Sixty-four is past any diagram a person reads while staying far short
+ * of a chain built to make the resolver work: the pass is linear, so this bounds
+ * how much a hostile document can ask of it, not how much a real one may.
+ */
+export const MAX_SCHEMATIC_PLACEMENT_DEPTH = 64;
+/**
+ * Maximum routing passes over one document before contention is fatal.
+ *
+ * The first pass is the greedy source-order route; each additional pass reorders
+ * by criticality, promotes the trace that failed, and retries. Twelve is chosen by
+ * measurement with headroom: the widest reversal bus this router can route at all
+ * is twelve wires, and it settles in seven passes.
+ *
+ * The cost is paid only by documents that fail a pass, and a document that is
+ * genuinely unroutable pays it in full before raising the diagnostic — so a host
+ * compiling untrusted source should keep this low and pair it with a timeout, as
+ * the resource-budget guidance already advises. `1` disables retries exactly,
+ * restoring pre-0.5 routing behaviour.
+ */
+export const MAX_SCHEMATIC_ROUTING_ATTEMPTS = 12;
 /** Maximum UTF-8 bytes the bounded SVG writer may emit. */
 export const MAX_SCHEMATIC_SVG_OUTPUT_BYTES = 268_435_456;
 
@@ -100,6 +124,10 @@ export interface SchematicResolvedLimits {
 	readonly wireCrossings: number;
 	/** Maximum UTF-8 bytes of generated markup. */
 	readonly svgOutputBytes: number;
+	/** Longest relative-placement reference chain; `Infinity` for no limit. */
+	readonly placementDepth: number;
+	/** Maximum routing passes; `1` disables rip-up retries. */
+	readonly routingAttempts: number;
 }
 
 /**
@@ -115,7 +143,9 @@ const LIMIT_DEFAULTS: SchematicResolvedLimits = Object.freeze({
 	connections: Number.POSITIVE_INFINITY,
 	sourceCharacters: MAX_SCHEMATIC_SOURCE_CHARACTERS,
 	wireCrossings: MAX_SCHEMATIC_WIRE_CROSSINGS,
-	svgOutputBytes: MAX_SCHEMATIC_SVG_OUTPUT_BYTES
+	svgOutputBytes: MAX_SCHEMATIC_SVG_OUTPUT_BYTES,
+	placementDepth: MAX_SCHEMATIC_PLACEMENT_DEPTH,
+	routingAttempts: MAX_SCHEMATIC_ROUTING_ATTEMPTS
 });
 
 /** The names a caller may override, derived so the two cannot drift apart. */

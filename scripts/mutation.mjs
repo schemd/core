@@ -103,6 +103,76 @@ const mutants = [
 		from: 'd="M0 1 11 6 0 11Z" fill="none"',
 		to: 'd="M0 1 11 6 0 11Z" fill="context-stroke"',
 		tests: ['tests/renderer.test.ts']
+	},
+	{
+		name: 'an unconstrained axis inherits the first reference',
+		file: 'src/placement.ts',
+		from: '\t\tlet position: SchematicPoint = { x: seed.originX, y: seed.originY };',
+		to: '\t\tlet position: SchematicPoint = { x: 0, y: 0 };',
+		tests: ['tests/placement.test.ts']
+	},
+	{
+		name: 'a direction measures from the reference body, not its origin',
+		file: 'src/placement.ts',
+		from: '\t\tconst rectangle = componentRectangle(component);\n\t\treturn { ...rectangle, originX: component.x, originY: component.y };',
+		to: '\t\treturn {\n\t\t\tminX: component.x,\n\t\t\tmaxX: component.x,\n\t\t\tminY: component.y,\n\t\t\tmaxY: component.y,\n\t\t\toriginX: component.x,\n\t\t\toriginY: component.y\n\t\t};',
+		tests: ['tests/placement.test.ts']
+	},
+	{
+		name: 'the two axis gap defaults stay distinct',
+		file: 'src/placement.ts',
+		from: '\t\t\t: PLACEMENT_VERTICAL_GAP);',
+		to: '\t\t\t: PLACEMENT_HORIZONTAL_GAP);',
+		tests: ['tests/placement.test.ts']
+	},
+	{
+		name: 'the placement depth budget is enforced',
+		file: 'src/placement.ts',
+		from: '\t\tif (chain > placementDepth) {',
+		to: '\t\tif (false && chain > placementDepth) {',
+		tests: ['tests/placement.test.ts']
+	},
+	{
+		name: 'reported placements are ordered by source line',
+		file: 'src/placement.ts',
+		from: '\treturn placements.sort((left, right) => left.line - right.line);',
+		to: '\treturn placements.sort((left, right) => right.line - left.line);',
+		tests: ['tests/placement.test.ts']
+	},
+	{
+		name: 'a declaration waits for every reference it names',
+		file: 'src/placement.ts',
+		from: '\t\t\tif (remaining === 0) ready.push(dependent);',
+		to: '\t\t\tready.push(dependent);',
+		tests: ['tests/placement.test.ts']
+	},
+	{
+		name: 'the first routing pass is source order',
+		file: 'src/layout.ts',
+		from: '\t\tconst base = pass === 1 ? connections.map((_, index) => index) : criticality;',
+		to: '\t\tconst base = criticality;',
+		tests: ['tests/rip-up.test.ts', 'tests/regressions.test.ts']
+	},
+	{
+		name: 'a failed trace is promoted to the front of the next pass',
+		file: 'src/layout.ts',
+		from: '\t\tpromoted.unshift(failed);',
+		to: '\t\tpromoted.push(failed);',
+		tests: ['tests/rip-up.test.ts']
+	},
+	{
+		name: 'the routing attempt budget is enforced',
+		file: 'src/layout.ts',
+		from: '\t\tif (pass >= routingAttempts || failedAt === 0) throw failure;',
+		to: '\t\tif (failedAt === 0) throw failure;',
+		tests: ['tests/rip-up.test.ts']
+	},
+	{
+		name: 'congestion cells are reported in a stable order',
+		file: 'src/layout.ts',
+		from: '\treturn cells.sort((left, right) => left.x - right.x || left.y - right.y);',
+		to: '\treturn cells;',
+		tests: ['tests/rip-up.test.ts']
 	}
 ];
 

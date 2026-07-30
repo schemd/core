@@ -1,7 +1,10 @@
 /** One-pass compiler facade for hosts that do not need the parser and renderer separately. */
+import type { SchematicRoutingReport } from './layout.js';
 import { resolveSchematicLimits, utf8ByteLength } from './limits.js';
 import { assertParsedSchematicDocument, parseSchematic } from './parser.js';
+import type { SchematicPlacement } from './placement.js';
 import { renderSchematic } from './renderer.js';
+import { parsedSchematicEvidence } from './route-cache.js';
 import type { CompileSchematicOptions, SchematicDocument } from './types.js';
 
 /** Small, allocation-bounded compilation counters. */
@@ -51,6 +54,21 @@ export interface SchematicCompilation {
 	readonly svg: string;
 	readonly metrics: SchematicCompilationMetrics;
 	readonly sourceMap: SchematicSourceMap;
+	/**
+	 * Coordinates the placement pass derived, one entry per relative declaration.
+	 *
+	 * Empty for a document that positioned everything with `at (x, y)`, which is
+	 * every document written before 0.5, so a host that never reads this field sees
+	 * no change. Hosts that offer "freeze to absolute" read the resolved
+	 * coordinates from here rather than re-deriving them.
+	 */
+	readonly placements: readonly SchematicPlacement[];
+	/**
+	 * What the router had to do: retries, torn-up traces, and canvas congestion.
+	 *
+	 * `attempts` is zero for any document that routed on the first pass.
+	 */
+	readonly routing: SchematicRoutingReport;
 }
 
 /**
@@ -94,6 +112,7 @@ export function compileSchematic(source: string, options: CompileSchematicOption
 	};
 	const document = parseSchematic(source, settled);
 	const svg = renderSchematic(document, settled);
+	const evidence = parsedSchematicEvidence(document);
 	return {
 		document,
 		svg,
@@ -103,6 +122,8 @@ export function compileSchematic(source: string, options: CompileSchematicOption
 			connections: document.connections.length,
 			svgBytes: utf8ByteLength(svg)
 		},
-		sourceMap: schematicSourceMap(document)
+		sourceMap: schematicSourceMap(document),
+		placements: evidence.placements,
+		routing: evidence.routing
 	};
 }

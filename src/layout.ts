@@ -2655,6 +2655,199 @@ function bridgedOrthogonalPath(
 }
 
 /**
+ * Side of a routing-hash cell in viewBox units.
+ *
+ * A congestion reading describes one cell of this size, anchored at the
+ * coordinates it reports. Exported because a host drawing a heatmap needs the
+ * cell size to draw a rectangle, and hard-coding 64 in the host is how the two
+ * drift apart the first time this cell size is tuned.
+ */
+export const SCHEMATIC_CONGESTION_CELL_SIZE = CROSSING_BUCKET_SIZE;
+
+/** One routing-hash cell and how many wire spans pass through it. */
+export interface SchematicCongestionCell {
+	/** Left edge of the cell in viewBox units. */
+	readonly x: number;
+	/** Top edge of the cell in viewBox units. */
+	readonly y: number;
+	/** Wire spans indexed into this cell. */
+	readonly load: number;
+}
+
+/** What the router had to do to place every trace. */
+export interface SchematicRoutingReport {
+	/**
+	 * Rip-up retries performed. Zero for a document that routed on the first pass,
+	 * which is every document that compiled before rip-up existed.
+	 */
+	readonly attempts: number;
+	/** Each trace torn up, and the retry that tore it up, in the order it happened. */
+	readonly rippedUp: readonly {
+		readonly connectionIndex: number;
+		readonly attempt: number;
+	}[];
+	/** Occupied cells only, ordered by column then row. */
+	readonly congestion: readonly SchematicCongestionCell[];
+}
+
+/**
+ * Read occupancy out of the hash the router already filled.
+ *
+ * Not a second index: `wireBuckets` is keyed by `column * stride + row` and every
+ * span the router placed is already in it, so this is a decode and a sort rather
+ * than a measurement. Empty cells are omitted — a sparse diagram on a large
+ * canvas has millions of them, and a heatmap draws what is there.
+ *
+ * The sort is what makes the result reviewable. Map iteration is insertion
+ * ordered, so it would otherwise reflect the order traces happened to be routed,
+ * and two runs that placed the same wires in a different order would report the
+ * same congestion in a different sequence.
+ */
+function congestionMap(index: RoutingIndex): readonly SchematicCongestionCell[] {
+	const cells: SchematicCongestionCell[] = [];
+	for (const [key, segments] of index.wireBuckets) {
+		const column = Math.floor(key / BUCKET_COLUMN_STRIDE);
+		const row = key - column * BUCKET_COLUMN_STRIDE;
+		cells.push({
+			x: column * CROSSING_BUCKET_SIZE,
+			y: row * CROSSING_BUCKET_SIZE,
+			load: segments.length
+		});
+	}
+	return cells.sort((left, right) => left.x - right.x || left.y - right.y);
+}
+
+/**
+ * Manhattan distance between a connection's two component origins.
+ *
+ * A criticality proxy for retry ordering only — never for the first pass, and
+ * never for geometry. Origins rather than resolved terminals keep it to two map
+ * lookups, and the ordering it produces is the same either way.
+ */
+function connectionSpan(
+	connection: SchematicConnection,
+	components: ReadonlyMap<string, SchematicComponent>
+): number {
+	const from = components.get(connection.from.componentId)!;
+	const to = components.get(connection.to.componentId)!;
+	return Math.abs(from.x - to.x) + Math.abs(from.y - to.y);
+}
+
+/**
+ * Route every trace, tearing up earlier ones when a later one has nowhere to go.
+ *
+ * The greedy source-order pass this wraps is unchanged and is still what runs for
+ * every document that already compiled: a clean pass returns from the first
+ * iteration having executed exactly the code it executed before rip-up existed,
+ * with `attempts` at zero. Retry is reached only by a trace that failed, which is
+ * a document that used to be rejected outright.
+ *
+ * On failure every trace already placed is torn up and the failed trace is
+ * promoted to the front of the next pass, ahead of everything that is not itself
+ * already promoted. This is the standard failed-nets-first heuristic, and the
+ * reason it works is that greedy routing spends the easy channels first: the
+ * trace that fails is the one with the least freedom, so routing it while the
+ * canvas is still empty lets the traces with more freedom bend around it.
+ *
+ * A reversal bus is the case that motivated this. Eleven wires cannot be routed
+ * in source order at any canvas size — widening the fence changes nothing,
+ * because the constraint is the order channels get claimed, not the room. It
+ * routes middle-out, and promoting failures reaches an order of that shape after
+ * a few passes.
+ *
+ * The promoted list only grows, and a trace that fails while already promoted
+ * moves to its front, so each pass strictly changes the order and the loop cannot
+ * revisit one. `routingAttempts` bounds it regardless.
+ *
+ * **Determinism.** Every choice here is a function of the arguments: promotion
+ * order follows failure order, the traces that are not promoted stay in source
+ * order, and the index is rebuilt from scratch each pass so no residue of a torn
+ * up trace can survive into the next one. There is no clock, no randomness, no
+ * scored or shuffled permutation, and no iteration over an unordered container.
+ * `tests/rip-up.test.ts` compiles a congested document a thousand times and
+ * asserts one distinct output rather than trusting this paragraph.
+ */
+function routeWithRipUp(
+	connections: readonly SchematicConnection[],
+	components: ReadonlyMap<string, SchematicComponent>,
+	bounds: SchematicBounds | undefined,
+	routingAttempts: number
+): {
+	readonly routes: RoutedConnection[];
+	readonly index: RoutingIndex;
+	readonly attempts: number;
+	readonly rippedUp: readonly { readonly connectionIndex: number; readonly attempt: number }[];
+} {
+	/** Traces promoted by an earlier failure, highest priority first. */
+	const promoted: number[] = [];
+	const rippedUp: { readonly connectionIndex: number; readonly attempt: number }[] = [];
+	/*
+	 * The base order every retry builds on: shortest span first, ties by source
+	 * index. Span is a criticality proxy — a trace whose endpoints are nearly level
+	 * has one good channel and no slack, while a long one can bend around what is
+	 * already there — so routing the tight ones into an empty canvas leaves the
+	 * loose ones room to detour. On a reversal bus this is exactly middle-out,
+	 * which routes widths that no source order can.
+	 *
+	 * It is a *base*, not a global change: the first pass is always source order, so
+	 * a document that already compiled is routed and reported exactly as before.
+	 */
+	const criticality = connections
+		.map((_, index) => index)
+		.sort((left, right) => connectionSpan(connections[left]!, components) - connectionSpan(connections[right]!, components) || left - right);
+	for (let pass = 1; ; pass += 1) {
+		const base = pass === 1 ? connections.map((_, index) => index) : criticality;
+		const order = [...promoted, ...base.filter((index) => !promoted.includes(index))];
+		const index = createRoutingIndex(components, connections);
+		const routes: RoutedConnection[] = new Array(connections.length);
+		let failedAt = -1;
+		let failure: unknown;
+		for (let position = 0; position < order.length; position += 1) {
+			const original = order[position]!;
+			const connection = connections[original]!;
+			try {
+				/* The original index is passed, never the permuted position: the
+				   crossing pass and the contact rules key on it to decide whether two
+				   traces share a net, and a permuted identity would silently rewrite
+				   which pairs are allowed to touch. */
+				const route = routeConnectionInternal(connection, components, bounds, index);
+				routes[original] = route;
+				indexCompletedRoute(index, route, connection, original);
+			} catch (error) {
+				/*
+				 * Contention arrives as a `SchematicSyntaxError`; anything else is a
+				 * defect, and retrying it eleven more times would burn the budget and
+				 * bury the stack that explains it. Unreachable from a valid entry point
+				 * because `createRoutingIndex` reserves every terminal approach before
+				 * the first trace is placed, so the bare `Error` a missing terminal
+				 * raises is thrown above rather than caught here. Retained because it is
+				 * the assertion that this stays true.
+				 */
+				/* v8 ignore next -- postcondition; see above. */
+				if (!(error instanceof SchematicSyntaxError)) throw error;
+				failedAt = position;
+				failure = error;
+				break;
+			}
+		}
+		if (failedAt === -1) {
+			return { routes, index, attempts: pass - 1, rippedUp };
+		}
+		/* A trace that fails with nothing placed before it fails on its own terms —
+		   its endpoints are unreachable, not contended — so there is nothing to tear
+		   up and the diagnostic it already raised is the right one. */
+		if (pass >= routingAttempts || failedAt === 0) throw failure;
+		for (const connectionIndex of order.slice(0, failedAt)) {
+			rippedUp.push({ connectionIndex, attempt: pass });
+		}
+		const failed = order[failedAt]!;
+		const existing = promoted.indexOf(failed);
+		if (existing !== -1) promoted.splice(existing, 1);
+		promoted.unshift(failed);
+	}
+}
+
+/**
  * Route connections in source order and bridge only the later trace at a true crossing.
  *
  * Fixed spatial buckets bound comparisons in typical sparse diagrams. Parallel
@@ -2671,13 +2864,34 @@ export function routeConnections(
 	bounds?: SchematicBounds,
 	wireCrossings: number = SCHEMATIC_LIMITS.wireCrossings
 ): readonly RoutedConnection[] {
-	const spatialIndex = createRoutingIndex(components, connections);
-	const routes: RoutedConnection[] = [];
-	for (const [routeIndex, connection] of connections.entries()) {
-		const route = routeConnectionInternal(connection, components, bounds, spatialIndex);
-		routes.push(route);
-		indexCompletedRoute(spatialIndex, route, connection, routeIndex);
-	}
+	return routeSchematicConnections(connections, components, bounds, wireCrossings).routes;
+}
+
+/**
+ * Route every connection, retrying around contention, and report how it went.
+ *
+ * Same routing as {@link routeConnections} — which is now a wrapper that discards
+ * the second half of this result — plus the router's own account of the work:
+ * how many passes it took, which traces it tore up, and where the canvas is
+ * congested. A host that only wants paths should keep calling `routeConnections`.
+ *
+ * @param connections - Validated connections in deterministic source order.
+ * @param components - Complete component map.
+ * @param bounds - Optional intrinsic routing bounds.
+ * @param wireCrossings - Ceiling on recorded orthogonal intersections.
+ * @param routingAttempts - Maximum routing passes before contention is fatal.
+ * @returns Routes in source order, and the routing report.
+ */
+export function routeSchematicConnections(
+	connections: readonly SchematicConnection[],
+	components: ReadonlyMap<string, SchematicComponent>,
+	bounds?: SchematicBounds,
+	wireCrossings: number = SCHEMATIC_LIMITS.wireCrossings,
+	routingAttempts: number = SCHEMATIC_LIMITS.routingAttempts
+): { readonly routes: readonly RoutedConnection[]; readonly report: SchematicRoutingReport } {
+	const attempt = routeWithRipUp(connections, components, bounds, routingAttempts);
+	const routes = attempt.routes;
+	const spatialIndex = attempt.index;
 	validateUniversalWireContacts(connections, routes);
 	const horizontalBuckets = new Map<number, AxisSegment[]>();
 	const verticalBuckets = new Map<number, AxisSegment[]>();
@@ -2813,13 +3027,20 @@ export function routeConnections(
 			index.set(bucketIndex, bucket);
 		}
 	}
-	return routes.map((route, index) =>
-		bridgedOrthogonalPath(
-			route,
-			crossingsByRoute.get(index) ?? new Map(),
-			connections[index]?.line
-		)
-	);
+	return {
+		routes: routes.map((route, index) =>
+			bridgedOrthogonalPath(
+				route,
+				crossingsByRoute.get(index) ?? new Map(),
+				connections[index]?.line
+			)
+		),
+		report: {
+			attempts: attempt.attempts,
+			rippedUp: attempt.rippedUp,
+			congestion: congestionMap(spatialIndex)
+		}
+	};
 }
 
 /**
@@ -3183,13 +3404,15 @@ function separationAdvice(
  *
  * @param document - Parsed immutable schematic document.
  * @param fence - Intrinsic canvas contract.
+ * @param routedConnections - Precomputed routes, when the caller already has them.
+ * @returns Routes in source order, and how the router arrived at them.
  * @throws {SchematicSyntaxError} At the originating component or connection line.
  */
-export function validateDocumentGeometry(
+export function validateSchematicGeometry(
 	document: SchematicDocument,
 	fence: SchematicFence,
 	routedConnections?: readonly RoutedConnection[]
-): readonly RoutedConnection[] {
+): { readonly routes: readonly RoutedConnection[]; readonly report: SchematicRoutingReport } {
 	validateComponentOverlaps(document.components);
 	for (const component of document.components) {
 		const extent = componentRectangle(component);
@@ -3227,25 +3450,58 @@ export function validateDocumentGeometry(
 			);
 		}
 	}
-	const routes =
-		routedConnections ??
-		routeConnections(
-			document.connections,
-			new Map(document.components.map((component) => [component.id, component])),
-			fence.bounds,
-			resolveSchematicLimits(fence.limits).wireCrossings
-		);
+	const limits = resolveSchematicLimits(fence.limits);
+	/* A caller that supplied routes already has them from somewhere this function
+	   cannot see, so there is no report to give; an empty one states that honestly
+	   rather than implying a clean first pass nobody observed. */
+	const routed =
+		routedConnections === undefined
+			? routeSchematicConnections(
+					document.connections,
+					new Map(document.components.map((component) => [component.id, component])),
+					fence.bounds,
+					limits.wireCrossings,
+					limits.routingAttempts
+				)
+			: { routes: routedConnections, report: EMPTY_ROUTING_REPORT };
+	const routes = routed.routes;
 	if (routes.length !== document.connections.length) {
 		throw new TypeError('Routed connection count does not match the schematic document.');
 	}
 	for (const [index, connection] of document.connections.entries()) {
-		const routed = routes[index]!;
-		if (!routed.points.every((point) => pointInsideBounds(point, fence.bounds))) {
+		const route = routes[index]!;
+		if (!route.points.every((point) => pointInsideBounds(point, fence.bounds))) {
 			throw new SchematicSyntaxError(
 				'Connection trace exceeds the declared schematic bounds.',
 				connection.line
 			);
 		}
 	}
-	return routes;
+	return routed;
+}
+
+/** The report for work this module did not do; see `validateSchematicGeometry`. */
+export const EMPTY_ROUTING_REPORT: SchematicRoutingReport = Object.freeze({
+	attempts: 0,
+	rippedUp: Object.freeze([]),
+	congestion: Object.freeze([])
+});
+
+/**
+ * Validate a document's geometry and return only its routes.
+ *
+ * Retained with its original signature for hosts that call it directly; new code
+ * wanting the routing report should call {@link validateSchematicGeometry}.
+ *
+ * @param document - Component and connection AST to validate.
+ * @param fence - Declared bounds, title, and budgets.
+ * @param routedConnections - Precomputed routes, when the caller already has them.
+ * @returns Routes in source order.
+ */
+export function validateDocumentGeometry(
+	document: SchematicDocument,
+	fence: SchematicFence,
+	routedConnections?: readonly RoutedConnection[]
+): readonly RoutedConnection[] {
+	return validateSchematicGeometry(document, fence, routedConnections).routes;
 }

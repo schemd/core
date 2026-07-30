@@ -6,7 +6,15 @@ const encoder = new TextEncoder();
 const MAX_MEDIAN_MS = new Map([
 	['simple-rc', 2],
 	['maximum-512-components', 30],
-	['dense-16x16-routing', 75]
+	['dense-16x16-routing', 75],
+	/*
+	 * The retry path needs its own ceiling. Every case above routes on the first
+	 * pass and would stay green if rip-up became arbitrarily expensive, because
+	 * they never enter it. This one is a twelve-wire reversal bus, which is the
+	 * widest this router places and takes seven passes to settle — so it prices
+	 * what a contended document actually costs.
+	 */
+	['contended-12-wire-bus', 120]
 ]);
 
 const simpleSource = `source:VIN "AC" at (90,150) #blue [type=voltage-ac]
@@ -39,6 +47,21 @@ for (let index = 0; index < 16; index += 1) {
 	denseLines.push(`T${index}.out -> B${index}.in #purple [ortho]`);
 }
 const denseRoutingSource = denseLines.join('\n');
+
+/*
+ * A full reversal bus: every trace crosses every other, so no source order routes
+ * it and the rip-up path is the only thing that places it. Twelve wires is the
+ * widest this router reaches, and it costs seven passes.
+ */
+const contendedBusLines = [];
+for (let index = 0; index < 12; index += 1) {
+	contendedBusLines.push(`port:L${index} "L" at (80,${100 + index * 140}) #blue`);
+	contendedBusLines.push(`port:R${index} "R" at (1200,${100 + (11 - index) * 140}) #blue`);
+}
+for (let index = 0; index < 12; index += 1) {
+	contendedBusLines.push(`L${index}.out -> R${index}.in #blue [ortho]`);
+}
+const contendedBusSource = contendedBusLines.join('\n');
 
 const repeatedSource = (count) =>
 	Array.from(
@@ -101,6 +124,12 @@ const report = {
 			denseRoutingSource,
 			{ bounds: { width: 1600, height: 1300 }, title: 'Dense routing benchmark', idPrefix: 'dense' },
 			9
+		),
+		measure(
+			'contended-12-wire-bus',
+			contendedBusSource,
+			{ bounds: { width: 1400, height: 2000 }, title: 'Contended routing benchmark', idPrefix: 'bus' },
+			5
 		)
 	],
 	repeatedSymbols: {

@@ -21,13 +21,22 @@ const BUDGETS = [
 		module: '../src/compiler.ts',
 		entry: (path) =>
 			`import { compileSchematic } from ${JSON.stringify(path)};globalThis.schemdCompile=compileSchematic;`,
-		maxGzipBytes: 32 * 1024
+		/*
+		 * 34 KiB from 32 in 0.5. Relative placement does not tree-shake out of this
+		 * budget and was never going to: it is a language feature, so `parseSchematic`
+		 * calls the lowering pass on every document and a host that compiles at all
+		 * carries it. The routing report is the same story from the other side — the
+		 * router is already here, and the report is what it now records while working.
+		 * Recorded rather than absorbed, and paid for by features rather than drift.
+		 */
+		maxGzipBytes: 34 * 1024
 	},
 	{
 		label: 'Package bundle (every public export)',
 		module: '../src/index.ts',
 		entry: (path) => `import * as schemd from ${JSON.stringify(path)};globalThis.schemd=schemd;`,
-		maxGzipBytes: 35 * 1024
+		/* 37 KiB from 35 in 0.5, for the same two features plus their exported types. */
+		maxGzipBytes: 37 * 1024
 	}
 ];
 
