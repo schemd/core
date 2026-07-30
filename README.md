@@ -99,4 +99,4 @@ New AST members are additive; consumers with exhaustive component-kind switches 
 
 After `bun install`, run `bun run test:visual:install` once to provision Chromium, then `bun run release:check` — type checking, 100% statement/branch/function/line coverage, bounded deterministic fuzzing, a 14-mutant 100%-kill gate, six Chromium pixel goldens, build, gzip budgets, and latency regression ceilings.
 
-[Issues](https://github.com/schemd/core/issues) · [MIT](./LICENSE)
+[Issues](https://github.com/schemd/core/issues) · [Contributing](./CONTRIBUTING.md) · [MIT](./LICENSE)

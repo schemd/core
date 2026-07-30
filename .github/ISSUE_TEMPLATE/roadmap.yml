@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Thanks for picking up an active roadmap item. Please agree on the shape of a large change here before opening a pull request.
+
+        New here? [CONTRIBUTING.md](https://github.com/schemd/core/blob/main/CONTRIBUTING.md) covers the project's invariants, the verification gates, and the diagnostic house style.
   - type: input
     id: item
     attributes:
@@ -36,7 +38,7 @@ body:
       options:
         - label: I checked for an existing issue or pull request for this item.
           required: true
-        - label: I will keep runtime dependencies at zero and the compiler below 20 KiB gzip.
+        - label: I will keep runtime dependencies at zero and both gzip budgets in scripts/check-bundle-size.mjs green (`bun run size`).
           required: true
         - label: I will add tests and keep statements, branches, functions, and lines at 100% coverage.
           required: true
