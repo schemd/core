@@ -1,103 +1,111 @@
 {
-  "name": "@schemd/core",
-  "version": "0.5.0",
-  "description": "Zero-dependency text-to-SVG compiler for schematics and UML.",
-  "homepage": "https://schemd.johnowolabiidogun.dev",
-  "bugs": {
-    "url": "https://github.com/schemd/core/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/schemd/core.git"
-  },
-  "author": {
-    "name": "John Owolabi Idogun",
-    "url": "https://www.johnowolabiidogun.dev"
-  },
-  "packageManager": "bun@1.3.14",
-  "type": "module",
-  "sideEffects": false,
-  "browser": false,
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "files": [
-    "dist",
-    "README.md",
-    "CHANGELOG.md"
-  ],
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./parser": {
-      "types": "./dist/parser.d.ts",
-      "import": "./dist/parser.js"
-    },
-    "./renderer": {
-      "types": "./dist/renderer.d.ts",
-      "import": "./dist/renderer.js"
-    },
-    "./compiler": {
-      "types": "./dist/compiler.d.ts",
-      "import": "./dist/compiler.js"
-    },
-    "./layout": {
-      "types": "./dist/layout.d.ts",
-      "import": "./dist/layout.js"
-    },
-    "./placement": {
-      "types": "./dist/placement.d.ts",
-      "import": "./dist/placement.js"
-    },
-    "./netlist": {
-      "types": "./dist/netlist.d.ts",
-      "import": "./dist/netlist.js"
-    },
-    "./describe": {
-      "types": "./dist/describe.d.ts",
-      "import": "./dist/describe.js"
-    },
-    "./math-label": {
-      "types": "./dist/math-label.d.ts",
-      "import": "./dist/math-label.js"
-    },
-    "./types": {
-      "types": "./dist/types.d.ts",
-      "import": "./dist/types.js"
-    }
-  },
-  "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.build.json && tsc -p tsconfig.types.json",
-    "benchmark": "bun run build && node scripts/benchmark.mjs",
-    "check": "tsc -p tsconfig.json --noEmit",
-    "prepack": "bun run build",
-    "release:check": "bun run check && bun run test:coverage && bun run test:mutation && bun run test:visual && bun run build && bun run size && node scripts/benchmark.mjs",
-    "size": "node scripts/check-bundle-size.mjs",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "test:fuzz": "vitest run tests/fuzz.test.ts",
-    "test:mutation": "node scripts/mutation.mjs",
-    "test:visual": "playwright test --config=playwright.config.ts",
-    "test:visual:install": "playwright install chromium"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.62.0",
-    "@vitest/coverage-v8": "^4.1.10",
-    "typescript": "^7.0.2",
-    "vite": "^8.1.5",
-    "vitest": "^4.1.10"
-  },
-  "engines": {
-    "node": ">=24"
-  },
-  "keywords": [
-    "schemd",
-    "schematic",
-    "svg",
-    "compiler",
-    "engineering",
-    "uml"
-  ],
-  "license": "MIT"
+	"name": "@schemd/core",
+	"version": "0.6.0",
+	"description": "Zero-dependency text-to-SVG compiler for schematics and UML.",
+	"homepage": "https://schemd.johnowolabiidogun.dev",
+	"bugs": {
+		"url": "https://github.com/schemd/core/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/schemd/core.git"
+	},
+	"author": {
+		"name": "John Owolabi Idogun",
+		"url": "https://www.johnowolabiidogun.dev"
+	},
+	"packageManager": "bun@1.3.14",
+	"type": "module",
+	"sideEffects": false,
+	"browser": false,
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist",
+		"README.md",
+		"CHANGELOG.md"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./parser": {
+			"types": "./dist/parser.d.ts",
+			"import": "./dist/parser.js"
+		},
+		"./renderer": {
+			"types": "./dist/renderer.d.ts",
+			"import": "./dist/renderer.js"
+		},
+		"./compiler": {
+			"types": "./dist/compiler.d.ts",
+			"import": "./dist/compiler.js"
+		},
+		"./decompile": {
+			"types": "./dist/decompile.d.ts",
+			"import": "./dist/decompile.js"
+		},
+		"./layout": {
+			"types": "./dist/layout.d.ts",
+			"import": "./dist/layout.js"
+		},
+		"./placement": {
+			"types": "./dist/placement.d.ts",
+			"import": "./dist/placement.js"
+		},
+		"./netlist": {
+			"types": "./dist/netlist.d.ts",
+			"import": "./dist/netlist.js"
+		},
+		"./describe": {
+			"types": "./dist/describe.d.ts",
+			"import": "./dist/describe.js"
+		},
+		"./math-label": {
+			"types": "./dist/math-label.d.ts",
+			"import": "./dist/math-label.js"
+		},
+		"./types": {
+			"types": "./dist/types.d.ts",
+			"import": "./dist/types.js"
+		},
+		"./snapshot": {
+			"types": "./dist/snapshot.d.ts",
+			"import": "./dist/snapshot.js"
+		}
+	},
+	"scripts": {
+		"build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.build.json && tsc -p tsconfig.types.json",
+		"benchmark": "bun run build && node scripts/benchmark.mjs",
+		"check": "tsc -p tsconfig.json --noEmit",
+		"prepack": "bun run build",
+		"release:check": "bun run check && bun run test:coverage && bun run test:mutation && bun run test:visual && bun run build && bun run size && node scripts/benchmark.mjs",
+		"size": "node scripts/check-bundle-size.mjs",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
+		"test:fuzz": "vitest run tests/fuzz.test.ts",
+		"test:mutation": "node scripts/mutation.mjs",
+		"test:visual": "playwright test --config=playwright.config.ts",
+		"test:visual:install": "playwright install chromium"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.62.0",
+		"@vitest/coverage-v8": "^4.1.10",
+		"typescript": "^7.0.2",
+		"vite": "^8.1.5",
+		"vitest": "^4.1.10"
+	},
+	"engines": {
+		"node": ">=24"
+	},
+	"keywords": [
+		"schemd",
+		"schematic",
+		"svg",
+		"compiler",
+		"engineering",
+		"uml"
+	],
+	"license": "MIT"
 }

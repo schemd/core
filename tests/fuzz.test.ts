@@ -1,7 +1,14 @@
 /** Deterministic bounded property fuzzing for topology, routing, and SVG serialization. */
 import { describe, expect, test } from 'vitest';
 
-import { compileSchematic, routeConnections, SchematicSyntaxError } from '../src/index.js';
+import {
+	compileSchematic,
+	parseSchematic,
+	routeConnections,
+	SchematicSyntaxError
+} from '../src/index.js';
+import { parseSchematicSvg } from '../src/decompile.js';
+import { snapshotSchematic } from '../src/snapshot.js';
 
 function randomSource(seed: number): () => number {
 	let state = seed >>> 0;
@@ -172,6 +179,74 @@ describe('bounded deterministic placement properties', () => {
 				first ??= outcome;
 				expect(outcome).toBe(first);
 			}
+		}
+	});
+});
+
+describe('bounded deterministic recovery properties', () => {
+	/**
+	 * Every random parallel topology, recovered from its own markup.
+	 *
+	 * This is the end-to-end claim: whatever the renderer stamped on a wire must
+	 * be what the parser resolved, for every document the generator produces. A
+	 * renderer that ever wrote an endpoint it did not draw fails here, and no
+	 * golden would notice.
+	 */
+	test('recovers the same topology from every randomized document', () => {
+		const random = randomSource(0x3d5a_7c11);
+		const fence = { bounds: { width: 1200, height: 900 }, title: 'Recovery fuzz' };
+		for (let iteration = 0; iteration < 40; iteration += 1) {
+			const rows = 2 + Math.floor(random() * 5);
+			const tracks = sampleTracks(random, rows);
+			const declarations: string[] = [];
+			const connections: string[] = [];
+			for (const [index, y] of tracks.entries()) {
+				declarations.push(`port:L${index} "L" at (80,${y}) #blue`);
+				declarations.push(`port:R${index} "R" at (1080,${y}) #emerald`);
+				connections.push(`L${index}.out -> R${index}.in #blue [ortho net=N${index}]`);
+			}
+			const source = [...declarations, ...connections].join('\n');
+			const compilation = compileSchematic(source, { ...fence, mode: 'full' });
+			const recovery = parseSchematicSvg(compilation.svg);
+
+			expect(recovery.components.map((part) => part.id)).toEqual(
+				compilation.document.components.map((part) => part.id)
+			);
+			expect(recovery.components.map((part) => [part.x, part.y])).toEqual(
+				compilation.document.components.map((part) => [part.x, part.y])
+			);
+			expect(recovery.connections.map((wire) => `${wire.from}->${wire.to}`)).toEqual(
+				compilation.document.connections.map(
+					(wire) =>
+						`${wire.from.componentId}.${wire.from.port}->${wire.to.componentId}.${wire.to.port}`
+				)
+			);
+			/* And the recovered source is not merely shaped right — it compiles. */
+			expect(() => compileSchematic(recovery.source, fence)).not.toThrow();
+		}
+	});
+
+	test('digests every randomized document identically on repeat', () => {
+		const random = randomSource(0x77c1_0b3e);
+		const fence = { bounds: { width: 1200, height: 900 }, title: 'Snapshot fuzz' };
+		for (let iteration = 0; iteration < 40; iteration += 1) {
+			const rows = 2 + Math.floor(random() * 5);
+			const tracks = sampleTracks(random, rows);
+			const declarations: string[] = [];
+			const connections: string[] = [];
+			for (const [index, y] of tracks.entries()) {
+				declarations.push(`port:L${index} "L" at (80,${y}) #blue`);
+				declarations.push(`port:R${index} "R" at (1080,${y}) #emerald`);
+				connections.push(`L${index}.out -> R${index}.in #blue [ortho net=N${index}]`);
+			}
+			const document = parseSchematic([...declarations, ...connections].join('\n'), fence);
+			const first = snapshotSchematic(document, fence);
+			expect(snapshotSchematic(document, fence)).toBe(first);
+			/* One line per declaration, always: a digest that silently dropped a
+			   trace would still look well-formed. */
+			expect(first.trimEnd().split('\n')).toHaveLength(
+				2 + document.components.length + document.connections.length
+			);
 		}
 	});
 });

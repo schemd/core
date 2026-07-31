@@ -2,6 +2,22 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
+## [0.6.0] - Unreleased
+
+### Added
+
+- **`snapshotSchematic` — a text digest of a diagram's geometry**, at `@schemd/core/snapshot`. Every component rectangle and every trace vertex, rounded to the three decimals the SVG writer emits, in source order, behind a `schemd-snapshot 1` version line. Committed as a fixture, a routing change now shows up in a pull request as the handful of coordinates that moved rather than as a red blob in an image diff. It does not replace the Chromium goldens: nothing here can tell you an arrowhead went missing, which is why `tests/visual` keeps the cases that need a renderer.
+- **`parseSchematicSvg` — reading a compiled diagram back into declarations**, at `@schemd/core/decompile`. `full` mode already stamps each node group with its id, kind, label, line and orientation, positions it with a `translate` and paints it with a colour token; each wire group carries its endpoints, net, signal domain and bus width. This reads that back and writes canonical DSL. It is a bounded scanner over the attribute set the renderer writes, not an XML parser — the only inputs that need to work are documents this compiler produced.
+- Recovery reports **what it could not get back**, in `lost`. Family options such as `type=` are not stamped anywhere a scanner can read — they survive only as prose inside an `aria-label` — so a recovered resistor is a plain resistor even if it was declared as a thermistor. There is deliberately no `fidelity: 'exact'` companion: every document with a component loses something, and a flag that can only hold one value tells a caller nothing.
+- A group missing anything `full` mode always writes is **skipped rather than guessed at**. Inventing a label, a source line, or a straight-line curve for markup that was edited after the fact would put a fabricated declaration into recovered source.
+
+### Verified
+
+- The digest is checked against the drawing, not just against itself: the suite parses each component's `translate` and each trace's `d` back out of the compiled SVG and requires them to match the digest. A digest that drifted from what was drawn would be worse than none.
+- Recovery is pinned by three round-trip properties — recovered source recompiles to the same topology, to the same placement, and is itself a fixed point — plus a fuzz property over randomized documents. That last one is an end-to-end assertion over the parser and the renderer at once: it fails if the renderer ever stamps a wire with an endpoint it did not draw, which no golden would notice.
+- Six mutants join the kill gate: the digest must use the writer's precision, must report a stated orientation, must read a curve from the path that was drawn, must write a CSS colour without the token sigil, must reject a colour the parser does not define, and must skip a group missing its attributes. Thirty of thirty are killed.
+- **One proposed mutant was removed rather than chased.** It swapped the digest's route-cache lookup for a fresh route — but both paths must produce identical output, and that agreement is the property the suite already asserts. It described an implementation detail, not a behaviour, and a mutant nothing can distinguish is noise in the gate.
+
 ## [0.5.0] - 2026-07-30
 
 ### Added

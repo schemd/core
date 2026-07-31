@@ -6,11 +6,11 @@
 
 `schemd` — pronounced like “skemd” (`/skɛmd/`) — is a strict, deterministic text-to-SVG compiler for electrical, digital, quantum, and UML diagrams. It has no runtime dependencies and never touches a DOM, Canvas, browser layout, external font, raster asset, or `getBBox()`.
 
-**The [documentation site](https://schemd.johnowolabiidogun.dev/docs/0.5/overview) is the reference.** Every page there is versioned per release line and every example is compiled by the real engine. This file is the short tour.
+**The [documentation site](https://schemd.johnowolabiidogun.dev/docs/0.6/overview) is the reference.** Every page there is versioned per release line and every example is compiled by the real engine. This file is the short tour.
 
-Version 0.5.0 needs Node.js 24 or newer.
+Version 0.6.0 needs Node.js 24 or newer.
 
-[Docs](https://schemd.johnowolabiidogun.dev/docs/0.5/overview) · [Playground](https://schemd.johnowolabiidogun.dev/playground) · [Inspector](https://schemd.johnowolabiidogun.dev/inspector/0.5.0) · [Changelog](./CHANGELOG.md) · [Roadmap](./ROADMAP.md)
+[Docs](https://schemd.johnowolabiidogun.dev/docs/0.6/overview) · [Playground](https://schemd.johnowolabiidogun.dev/playground) · [Inspector](https://schemd.johnowolabiidogun.dev/inspector/0.6.0) · [Changelog](./CHANGELOG.md) · [Roadmap](./ROADMAP.md)
 
 ## Install
 
@@ -50,25 +50,27 @@ Bad variants, duplicate options, unknown ports, mismatched bus widths, unsafe co
 
 ## What it compiles
 
-Electrical, digital, quantum, and UML families — the full vocabulary is in the [component reference](https://schemd.johnowolabiidogun.dev/docs/0.5/component-reference).
+Electrical, digital, quantum, and UML families — the full vocabulary is in the [component reference](https://schemd.johnowolabiidogun.dev/docs/0.6/component-reference).
 
 A compiled diagram is also a model. `buildNetlist` gives you nodes, nets, and edges; `verifyNetlist` runs seven design rules over them; `describeSchematic` turns the same connectivity into prose for a screen reader. The compilation also hands back its own working: `sourceMap` (every vector's declaration line), `placements` (what each relation resolved to), and `routing` (retries, torn-up traces, per-cell congestion).
 
+And the output is readable back. `snapshotSchematic` writes a text digest of the geometry, so a routing change reviews as a handful of moved coordinates rather than an image diff; `parseSchematicSvg` reads a `full`-mode SVG back into declarations, naming what the markup does not carry rather than guessing at it.
+
 ## Before you rely on it
 
-Please read the [limitations](https://schemd.johnowolabiidogun.dev/docs/0.5/overview#limitations) before treating a clean compile as an engineering result. The short version:
+Please read the [limitations](https://schemd.johnowolabiidogun.dev/docs/0.6/overview#limitations) before treating a clean compile as an engineering result. The short version:
 
 - **`verifyNetlist` is structural linting, not verification.** It cannot tell you anything about analog correctness, timing, impedance, drive strength, metastability, or quantum validity. A clean result means no rule fired.
 - **Routing is greedy and bounded.** It retries around contention, which takes a full reversal bus to twelve wires. Thirteen is unroutable and no reordering reaches it — that is a limit of the channel model, not of declaration order.
 - **The model is flat.** No hierarchy, no sub-sheets, no simulation, no timing analysis, no certification. It suits documentation, teaching, and schematics rather than large engineering designs.
-- **Compiling source you did not write?** Pass [`limits`](https://schemd.johnowolabiidogun.dev/docs/0.5/limits) and a timeout of your own.
+- **Compiling source you did not write?** Pass [`limits`](https://schemd.johnowolabiidogun.dev/docs/0.6/limits) and a timeout of your own.
 - **Published performance figures are narrow.** Warm medians on one machine. Run `bun run benchmark` on yours.
 
 ## Compatibility
 
-0.2.x through 0.4.x documents still compile. 0.5 only adds: relative placement is new syntax, `placements` and `routing` are new fields that stay empty for documents that do not use them, and every existing entry point keeps its signature. One thing you may notice is that a document which used to be rejected as unroutable can now compile, having been retried.
+0.2.x through 0.5.x documents still compile. 0.6 only adds two new modules behind their own subpaths; nothing on the compile path changed. 0.5 before it only added: relative placement is new syntax, `placements` and `routing` are new fields that stay empty for documents that do not use them, and every existing entry point keeps its signature. One thing you may notice is that a document which used to be rejected as unroutable can now compile, having been retried.
 
-Upgrading across 0.4 as well? See [migration](https://schemd.johnowolabiidogun.dev/docs/0.5/overview#migrate) — port aliases now report their canonical terminal, and the component and connection ceilings are gone.
+Upgrading across 0.4 as well? See [migration](https://schemd.johnowolabiidogun.dev/docs/0.6/overview#migrate) — port aliases now report their canonical terminal, and the component and connection ceilings are gone.
 
 ## Contributing
 

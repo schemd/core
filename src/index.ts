@@ -23,6 +23,17 @@ export {
 	type PendingPlacement,
 	type SchematicPlacement
 } from './placement.js';
+/*
+ * `snapshot` and `decompile` are deliberately absent from this entry, exactly as
+ * `describe` is. Both are tools a host reaches for on purpose — a test harness
+ * writing geometry digests, an editor reading an SVG back — and neither is on
+ * the compile path. Re-exporting them here would put their bytes into every
+ * bundle that measures this module, which is what registry size tools report,
+ * to serve callers who can import them directly:
+ *
+ *   import { snapshotSchematic } from '@schemd/core/snapshot';
+ *   import { parseSchematicSvg } from '@schemd/core/decompile';
+ */
 export {
 	buildNetlist,
 	inspectSchematic,

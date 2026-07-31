@@ -173,6 +173,48 @@ const mutants = [
 		from: '\treturn cells.sort((left, right) => left.x - right.x || left.y - right.y);',
 		to: '\treturn cells;',
 		tests: ['tests/rip-up.test.ts']
+	},
+	{
+		name: 'a digest states the precision the SVG writer uses',
+		file: 'src/snapshot.ts',
+		from: '\treturn value.toFixed(3);',
+		to: '\treturn value.toFixed(2);',
+		tests: ['tests/snapshot.test.ts']
+	},
+	{
+		name: 'a digest reports the orientation a declaration stated',
+		file: 'src/snapshot.ts',
+		from: "\tif ('orientation' in component && component.orientation !== undefined) {",
+		to: "\tif ('orientation' in component && component.orientation === undefined) {",
+		tests: ['tests/snapshot.test.ts']
+	},
+	{
+		name: 'recovery reads a curve from the path that was drawn',
+		file: 'src/decompile.ts',
+		from: "\tif (/\\s[HV]\\s/.test(path)) return 'ortho';",
+		to: "\tif (false) return 'ortho';",
+		tests: ['tests/decompile.test.ts']
+	},
+	{
+		name: 'recovery writes a CSS colour without the token sigil',
+		file: 'src/decompile.ts',
+		from: "\tif (color.kind === 'css') return color.value;",
+		to: "\tif (color.kind === 'css') return `#${color.value}`;",
+		tests: ['tests/decompile.test.ts']
+	},
+	{
+		name: 'recovery rejects a colour token the parser does not define',
+		file: 'src/decompile.ts',
+		from: '\treturn (SEMANTIC_COLORS as readonly string[]).includes(value);',
+		to: '\treturn true;',
+		tests: ['tests/decompile.test.ts']
+	},
+	{
+		name: 'recovery skips a group missing what full mode always writes',
+		file: 'src/decompile.ts',
+		from: '\t\tif (id === undefined || kind === undefined || label === undefined || line === undefined) {',
+		to: '\t\tif (id === undefined || kind === undefined) {',
+		tests: ['tests/decompile.test.ts']
 	}
 ];
 
