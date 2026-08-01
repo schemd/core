@@ -334,6 +334,19 @@ const mutants = [
 		from: '\treturn this.#at;',
 		to: '\treturn this.#buffer.length;',
 		tests: ['tests/byte-writer.test.ts', 'tests/compiler.test.ts']
+	},
+	/*
+	 * The family predicates answer by hash rather than by linear scan. What makes
+	 * that safe is that each set is *derived* from the registry it mirrors, so it
+	 * cannot fall out of step with the keywords the parser accepts. Emptying one
+	 * is the drift a hand-written literal would have risked, and it must be loud.
+	 */
+	{
+		name: 'a family set is derived from the registry it classifies',
+		file: 'src/layout.ts',
+		from: 'const UML_COMPONENT_KIND_SET: ReadonlySet<string> = new Set(UML_COMPONENT_KINDS);',
+		to: 'const UML_COMPONENT_KIND_SET: ReadonlySet<string> = new Set();',
+		tests: ['tests/uml.test.ts', 'tests/layout.test.ts']
 	}
 ];
 

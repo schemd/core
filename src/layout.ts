@@ -359,6 +359,25 @@ export function quantumGateDimensions(component: QuantumGateComponent): {
 	return { bodyWidth, bodyHeight, stubExtent: bodyWidth / 2 + 23 };
 }
 
+/*
+ * Membership sets for the four family predicates below.
+ *
+ * These were `KINDS.includes(component.kind)`. That is a linear scan with string
+ * equality at every step, and the *false* answer is the expensive one: an
+ * electrical component asks `isUmlComponent` and walks all forty-seven UML
+ * keywords before being told no. A 512-component profile put the four guards at
+ * roughly 5% of compile time, nearly all of it in that failing scan.
+ *
+ * A `Set` answers the same question by hash. It is built from the same frozen
+ * arrays, so membership cannot drift from the registries the parser validates
+ * against — there is no second list to keep in step — and it introduces no new
+ * string literals, which is what keeps this off the gzip budget.
+ */
+const CLASSICAL_GATE_KIND_SET: ReadonlySet<string> = new Set(CLASSICAL_GATE_KINDS);
+const DIGITAL_COMPONENT_KIND_SET: ReadonlySet<string> = new Set(DIGITAL_COMPONENT_KINDS);
+const QUANTUM_SPECIAL_KIND_SET: ReadonlySet<string> = new Set(QUANTUM_SPECIAL_KINDS);
+const UML_COMPONENT_KIND_SET: ReadonlySet<string> = new Set(UML_COMPONENT_KINDS);
+
 /**
  * Narrow any component to the classical-gate union.
  *
@@ -366,22 +385,22 @@ export function quantumGateDimensions(component: QuantumGateComponent): {
  * @returns Whether its kind belongs to the classical gate registry.
  */
 export function isClassicalGate(component: SchematicComponent): component is ClassicalGateComponent {
-	return CLASSICAL_GATE_KINDS.includes(component.kind as ClassicalGateComponent['kind']);
+	return CLASSICAL_GATE_KIND_SET.has(component.kind);
 }
 
 export function isDigitalComponent(component: SchematicComponent): component is DigitalComponent {
-	return DIGITAL_COMPONENT_KINDS.includes(component.kind as DigitalComponent['kind']);
+	return DIGITAL_COMPONENT_KIND_SET.has(component.kind);
 }
 
 export function isQuantumSpecial(
 	component: SchematicComponent
 ): component is QuantumSpecialComponent {
-	return QUANTUM_SPECIAL_KINDS.includes(component.kind as QuantumSpecialComponent['kind']);
+	return QUANTUM_SPECIAL_KIND_SET.has(component.kind);
 }
 
 /** Narrow a schematic component to a first-class UML node. */
 export function isUmlComponent(component: SchematicComponent): component is UmlComponent {
-	return UML_COMPONENT_KINDS.includes(component.kind as UmlComponent['kind']);
+	return UML_COMPONENT_KIND_SET.has(component.kind);
 }
 
 /** Return the exact canonical turn stored by any direction-sensitive component. */
@@ -1544,7 +1563,12 @@ function indexedSegmentCollision(
 	for (let column = minimum; column <= maximum; column += 1) {
 		const columnKey = column * BUCKET_COLUMN_STRIDE;
 		for (let row = lowestRow; row <= highestRow; row += 1) {
-			for (const entry of index.rectangleBuckets.get(columnKey + row) ?? []) {
+			/* An empty cell is the common answer on a sparse grid, and `?? []`
+			   paid for it with a fresh array and an iterator per miss. Skipping
+			   costs one comparison. */
+			const entries = index.rectangleBuckets.get(columnKey + row);
+			if (entries === undefined) continue;
+			for (const entry of entries) {
 				/* Stamp before testing: an obstacle spanning several cells was
 				   otherwise re-examined once per cell. */
 				if (entry.seen === query) continue;
@@ -1689,7 +1713,10 @@ function wireSegmentCost(
 	for (let column = minimum; column <= maximum; column += 1) {
 		const columnKey = column * BUCKET_COLUMN_STRIDE;
 		for (let row = lowestRow; row <= highestRow; row += 1) {
-			for (const previous of index.wireBuckets.get(columnKey + row) ?? []) {
+			/* Same empty-cell skip as `indexedSegmentCollision`. */
+			const occupants = index.wireBuckets.get(columnKey + row);
+			if (occupants === undefined) continue;
+			for (const previous of occupants) {
 				if (previous.seen === query) continue;
 				previous.seen = query;
 				if (Math.min(previous.start.y, previous.end.y) > highestY) continue;

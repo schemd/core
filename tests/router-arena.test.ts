@@ -247,18 +247,30 @@ describe('epoch reuse', () => {
 });
 
 describe('determinism', () => {
-	test('a congested document compiles to one output over many runs', () => {
-		const source = reversalBus(12);
-		const outputs = new Set<string>();
-		const attempts = new Set<number>();
-		for (let run = 0; run < 40; run += 1) {
-			const result = compileSchematic(source, { ...BUS_FENCE, mode: 'full' });
-			outputs.add(result.svg);
-			attempts.add(result.routing.attempts);
-		}
-		expect(outputs.size).toBe(1);
-		expect(attempts.size).toBe(1);
-	});
+	test(
+		'a congested document compiles to one output over many runs',
+		() => {
+			const source = reversalBus(12);
+			const outputs = new Set<string>();
+			const attempts = new Set<number>();
+			for (let run = 0; run < 40; run += 1) {
+				const result = compileSchematic(source, { ...BUS_FENCE, mode: 'full' });
+				outputs.add(result.svg);
+				attempts.add(result.routing.attempts);
+			}
+			expect(outputs.size).toBe(1);
+			expect(attempts.size).toBe(1);
+		},
+		/*
+		 * Forty compilations of the widest bus the router places, each of which
+		 * takes seven rip-up passes. That is around a second unencumbered and
+		 * several times that under V8 coverage instrumentation on a shared CI
+		 * runner, which is what pushed it past the 5 s default. The three sibling
+		 * determinism tests in `rip-up` and `nudging` already carry this same
+		 * allowance for the same reason; this one was simply never given it.
+		 */
+		60_000
+	);
 
 	test('interleaving other documents does not perturb a route', () => {
 		/*
