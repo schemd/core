@@ -215,6 +215,67 @@ const mutants = [
 		from: '\t\tif (id === undefined || kind === undefined || label === undefined || line === undefined) {',
 		to: '\t\tif (id === undefined || kind === undefined) {',
 		tests: ['tests/decompile.test.ts']
+	},
+	{
+		/*
+		 * The defect this arena actually shipped with, before the corpus caught it.
+		 * `wireSegmentCost` prices a contact the geometry validator would reject at
+		 * infinity; treating an unvisited state as improvable rather than as
+		 * costing infinity admits that edge, and the router returns overlapping
+		 * copper. Only congested documents notice.
+		 */
+		name: 'an unvisited router state costs infinity, not "anything is better"',
+		file: 'src/layout.ts',
+		from: '\t\tconst known = this.#stamp[state] === this.#epoch ? this.#g[state]! : Number.POSITIVE_INFINITY;\n\t\treturn g < known;',
+		to: '\t\treturn this.#stamp[state] !== this.#epoch || g < this.#g[state]!;',
+		tests: ['tests/router-arena.test.ts', 'tests/rip-up.test.ts']
+	},
+	{
+		name: 'the router heap breaks ties on g before state',
+		file: 'src/layout.ts',
+		from: '\t\treturn leftF !== rightF ? leftF < rightF : leftG !== rightG ? leftG < rightG : leftState < rightState;',
+		to: '\t\treturn leftF !== rightF ? leftF < rightF : leftState < rightState;',
+		tests: ['tests/router-arena.test.ts']
+	},
+	{
+		name: 'a new route must not inherit the previous route\'s scores',
+		file: 'src/layout.ts',
+		from: '\t\tthis.#epoch += 1;\n\t\tthis.#size = 0;',
+		to: '\t\tthis.#size = 0;',
+		tests: ['tests/router-arena.test.ts']
+	},
+	{
+		/*
+		 * Lazy deletion means the heap outgrows the state count. Sizing it once
+		 * from the grid and never growing silently drops queued states, which a
+		 * congested document turns into a route it should have found.
+		 */
+		name: 'the router heap grows past the state count',
+		file: 'src/layout.ts',
+		from: '\t\tthis.#reserveHeap(this.#size + 1);',
+		to: '',
+		tests: ['tests/router-arena.test.ts']
+	},
+	{
+		name: 'the SVG writer refuses a chunk that overruns the budget',
+		file: 'src/renderer.ts',
+		from: '\t\tif (read < chunk.length || written > remaining) throw this.#overBudget();',
+		to: '\t\tif (written > remaining) throw this.#overBudget();',
+		tests: ['tests/byte-writer.test.ts']
+	},
+	{
+		name: 'a rejected SVG append commits nothing',
+		file: 'src/renderer.ts',
+		from: '\t\tif (read < chunk.length || written > remaining) throw this.#overBudget();\n\t\tthis.#at += written;',
+		to: '\t\tthis.#at += written;\n\t\tif (read < chunk.length || written > remaining) throw this.#overBudget();',
+		tests: ['tests/byte-writer.test.ts']
+	},
+	{
+		name: 'the SVG writer reports the size it actually wrote',
+		file: 'src/renderer.ts',
+		from: '\treturn this.#at;',
+		to: '\treturn this.#buffer.length;',
+		tests: ['tests/byte-writer.test.ts', 'tests/compiler.test.ts']
 	}
 ];
 

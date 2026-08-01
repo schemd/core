@@ -6,7 +6,7 @@ import {
 	type CompileSchematicOptions,
 	type SchematicFence
 } from '../src/index.js';
-import { BoundedSvgWriter, MAX_SVG_OUTPUT_BYTES } from '../src/renderer.js';
+import { MAX_SVG_OUTPUT_BYTES } from '../src/renderer.js';
 
 const fence: SchematicFence = {
 	bounds: { width: 640, height: 260 },
@@ -531,20 +531,20 @@ ic:U1 "Flight control multiplexer" at (390, 130) #cyan [left="SELECT_LONG" right
 		).toThrow(/geometry exceeds the declared 100x100 bounds/);
 	});
 
-	test('aborts incremental rendering before exceeding the bounded SVG output budget', () => {
+	test('aborts rendering before exceeding the bounded SVG output budget', () => {
 		/*
-		 * Exercised at a limit small enough to reach, because the compiler's own is
-		 * now sized so that only markup no host could hold gets near it. The
-		 * boundary arithmetic is what matters: a multi-byte character that crosses
-		 * the ceiling is refused whole, and the writer stays usable afterwards.
+		 * The writer's own boundary arithmetic, atomicity and growth live in
+		 * `tests/byte-writer.test.ts`. What belongs here is that the *renderer*
+		 * routes its output through the budget at all — a document that cannot fit
+		 * must be refused rather than returned truncated.
 		 */
-		const writer = new BoundedSvgWriter(1_024);
-		const allocation = 'x'.repeat(1_023);
-		writer.append(allocation);
-		expect(() => writer.append('é')).toThrow(/1,024 byte output limit/);
-		writer.append('x');
-		expect(writer.finish()).toBe(allocation + 'x');
-		expect(() => new BoundedSvgWriter().append('x')).not.toThrow();
+		expect(() =>
+			renderSchematic(parseSchematic(source, fence), {
+				...fence,
+				mode: 'full',
+				limits: { svgOutputBytes: 256 }
+			})
+		).toThrow(/256 byte output limit/);
 		expect(MAX_SVG_OUTPUT_BYTES).toBe(268_435_456);
 	});
 });

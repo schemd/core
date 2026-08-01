@@ -213,21 +213,3 @@ export function resolveSchematicLimits(value: unknown): SchematicResolvedLimits 
 	}
 	return resolved;
 }
-
-/**
- * Return the exact UTF-8 byte length without allocating an encoded copy.
- *
- * @param value - JavaScript string whose encoded output cost is required.
- * @returns Number of UTF-8 bytes, including four-byte astral code points.
- */
-export function utf8ByteLength(value: string): number {
-	let bytes = 0;
-	for (const character of value) {
-		const codePoint = character.codePointAt(0)!;
-		if (codePoint <= 0x7f) bytes += 1;
-		else if (codePoint <= 0x7ff) bytes += 2;
-		else if (codePoint <= 0xffff) bytes += 3;
-		else bytes += 4;
-	}
-	return bytes;
-}

@@ -2,6 +2,29 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
+## [Unreleased]
+
+### Performance
+
+- **The SVG writer encodes instead of counting.** `BoundedSvgWriter` measured each fragment with a hand-written scan over every code unit and then stored the fragment again as a string; on a 512-component document that scan alone was 1.23 ms of a 6.29 ms render. Fragments now encode straight into one growable buffer, so measuring and storing are the same operation, and `encodeInto` reports the byte count as a side effect of work already being done. A 512-component figure compiles in 3.52 ms, from 5.52 ms.
+- The budget stayed exact and stayed atomic, which is why it was worth doing this way rather than estimating. A chunk that does not fit entirely is detected rather than truncated, and the cursor advances only after the check passes — so a rejected append commits nothing, the property 0.3.2 fixed, now structural instead of maintained by ordering.
+- **A rejected append can no longer be rejected wrongly.** The retired counter assumed any high surrogate began a valid pair and charged four bytes; an unpaired one encodes to three, so a document that fits could be refused. The writer now charges what it actually writes.
+- `compileSchematic` no longer rescans the finished document to report `metrics.svgBytes`. The writer already counted it.
+- **The orthogonal router's fallback search allocates nothing.** The bounded sparse A* kept a heap of object literals and two `Map`s — tens of thousands of short-lived objects and two hash lookups per neighbour, on the hottest loop in the compiler. It is now three parallel typed arrays with the score columns indexed by state, the four-neighbour expansion unrolled, and one pair of scratch points for the whole search. A twelve-wire contended bus compiles in 29.3 ms, from 33.9 ms.
+- The arena is reused across routes **and across rip-up passes**, which is where it matters: a twelve-wire bus takes seven passes, and each one used to rebuild its heap and maps. A generation stamp replaces clearing, so starting a route costs one integer increment.
+
+### Verified
+
+- **A byte-identity corpus is now committed rather than improvised.** 0.3.5 validated three router changes against SHA-256 digests of compiled output, but the harness was a one-off, so every refactor since has had to re-argue the point from goldens. `scripts/corpus.mjs` compiles 261 documents — every component kind alone, every family's variant axis, four orientations of six kinds, every routing strategy and marker, forty seeded grids, relative placement, every output mode, and 51 documents that must be **rejected** — and digests the SVG together with the source map, placements and routing report. Both changes above are byte-identical across all 261, including the eleven- and twelve-wire buses that only compile by rip-up.
+- Seven mutants join the kill gate: an unvisited router state must cost infinity, the heap must break ties on `g` before `state`, a new route must not inherit the previous route's scores, the heap must grow past the state count, the writer must refuse a chunk that overruns the budget, a rejected append must commit nothing, and the writer must report the size it actually wrote. Thirty-seven of thirty-seven are killed.
+- **One mutant describes a defect this work actually shipped and the corpus caught.** `wireSegmentCost` prices a contact the geometry validator would reject at infinity, and the retired `g >= (gScore.get(state) ?? Number.POSITIVE_INFINITY)` is what refused it. Rewriting that as "an unvisited state is always an improvement" admits the illegal edge, and the router returns overlapping copper. Only congested documents notice, because only they price a contact that high — first-pass routes stayed byte-identical throughout.
+
+### Measured and not adopted
+
+- **A packed glyph tape makes the bundle larger.** Nineteen static component vectors were re-encoded into an 85-symbol alphabet with coordinates as single characters, decoded by one interpreter, producing byte-identical output. It measured 20% smaller minified and **3% larger gzipped**: a packed tape is high-entropy and the templates it replaced compressed about 3.7:1. Dense packing wins in memory and loses on the wire.
+- **A verbatim glyph table did not pay either, on this code.** Keeping the path data as low-entropy text and deleting only the per-variant functions and switch arms measured 23.5 B gzip per glyph against 33.6 B in a standalone prototype — but applied to the real `diode`, `transistor` and `ground` families it added 55 B. The prototype's baseline did not share substructure; `diodeShape` already hoists the junction path into a local and reuses it seven times, so the table de-duplicates worse than the code it would replace. Reverted.
+- Both budgets tightened rather than moved: the compiler bundle is 34,518 B gzip against its 34,816 B ceiling, leaving 298 B where 0.6.0 left 882 B. The router arena is what spent it. Recorded here rather than absorbed, and no budget was raised to accommodate it.
+
 ## [0.6.0] - 2026-07-31
 
 ### Added

@@ -1752,58 +1752,245 @@ function indexCompletedRoute(
 	if (label !== undefined) addRoutingRectangle(index, `wire-${routeIndex}`, 'label', label);
 }
 
-/** Deterministic minimum heap used by the bounded sparse Manhattan fallback. */
-class RouteHeap {
-	readonly #items: { state: number; cell: number; direction: number; g: number; f: number }[] = [];
+/** Directions a router state can arrive from: unset, horizontal, vertical. */
+const ROUTER_DIRECTIONS = 3;
+
+/** Sentinel for "no predecessor" in the arena's parent column. */
+const NO_STATE = -1;
+
+/**
+ * Allocation-free scratch for the bounded sparse Manhattan fallback.
+ *
+ * The retired implementation allocated a `{ state, cell, direction, g, f }`
+ * object per heap entry and kept `gScore`/`previous` in two `Map`s. On a dense
+ * document that is tens of thousands of short-lived objects and two hash lookups
+ * per neighbour, on the hottest loop in the compiler. Here the heap is three
+ * parallel typed arrays and the score columns are indexed directly by state.
+ *
+ * Two details carry the correctness of the whole structure:
+ *
+ * - **The comparison is byte-for-byte the retired `RouteHeap.before`.** Ordering
+ *   by `(f, g, state)` is what makes routing deterministic, and determinism is a
+ *   published property — a document must compile to one output across runs and
+ *   platforms. The tuple is unpacked into six arguments, and nothing else moved.
+ * - **`stamp` replaces clearing.** A state counts as visited only when its stamp
+ *   equals the current epoch, so starting a route costs one integer increment
+ *   rather than zeroing two grid-sized arrays. This is what makes the arena
+ *   reusable across the rip-up passes, which a twelve-wire bus needs seven of.
+ */
+export class RouterArena {
+	/** Best known cost to each state; meaningful only when stamped current. */
+	#g: Float64Array;
+	/** Predecessor state, for path reconstruction. */
+	#previous: Int32Array;
+	/** Epoch in which each state was last written. */
+	#stamp: Int32Array;
+	/** Current epoch. Incremented once per route. */
+	#epoch = 0;
+	/** Heap columns, ordered by {@link RouterArena.before}. */
+	#heapState: Int32Array;
+	#heapF: Float64Array;
+	#heapG: Float64Array;
+	/** Number of live heap entries. */
+	#size = 0;
+	/** State and cost most recently removed by {@link pop}. */
+	poppedState = NO_STATE;
+	poppedG = 0;
+
+	constructor() {
+		this.#g = new Float64Array(0);
+		this.#previous = new Int32Array(0);
+		this.#stamp = new Int32Array(0);
+		this.#heapState = new Int32Array(0);
+		this.#heapF = new Float64Array(0);
+		this.#heapG = new Float64Array(0);
+	}
+
+	/**
+	 * Ready the arena for one route over a grid of `cells` cells.
+	 *
+	 * Columns grow to fit and are never shrunk, so a document's largest route
+	 * sizes the arena for every route after it.
+	 *
+	 * @param cells - Number of lane-grid cells this route can reach.
+	 */
+	begin(cells: number): void {
+		const states = cells * ROUTER_DIRECTIONS;
+		if (states > this.#g.length) {
+			this.#g = new Float64Array(states);
+			this.#previous = new Int32Array(states);
+			/* A fresh stamp column is all zeroes, so the epoch must leave zero
+			   behind or every state in it would read as already visited. */
+			this.#stamp = new Int32Array(states);
+			this.#epoch = 0;
+		}
+		this.#reserveHeap(states);
+		this.#epoch += 1;
+		this.#size = 0;
+	}
+
+	/**
+	 * Grow the heap columns to at least `required` entries, preserving contents.
+	 *
+	 * The heap is *not* bounded by the number of states. A state is pushed again
+	 * every time a cheaper route to it is found and the superseded entry stays in
+	 * place until it surfaces — the standard lazy-deletion trade, and the reason
+	 * `current()` exists. Sizing these columns to the state count would overflow
+	 * on exactly the congested documents the fallback is for.
+	 */
+	#reserveHeap(required: number): void {
+		if (required <= this.#heapState.length) return;
+		let capacity = Math.max(this.#heapState.length, 1);
+		while (capacity < required) capacity *= 2;
+		const states = new Int32Array(capacity);
+		const costs = new Float64Array(capacity);
+		const depths = new Float64Array(capacity);
+		states.set(this.#heapState);
+		costs.set(this.#heapF);
+		depths.set(this.#heapG);
+		this.#heapState = states;
+		this.#heapF = costs;
+		this.#heapG = depths;
+	}
 
 	get size(): number {
-		return this.#items.length;
+		return this.#size;
 	}
 
-	push(item: { state: number; cell: number; direction: number; g: number; f: number }): void {
-		this.#items.push(item);
-		let index = this.#items.length - 1;
+	/**
+	 * The retired `RouteHeap.before`, unpacked.
+	 *
+	 * Ordering by `(f, g, state)` — cost first, then depth, then a stable
+	 * tiebreak on identity — is the entire reason two runs of this router agree.
+	 */
+	static before(
+		leftF: number,
+		leftG: number,
+		leftState: number,
+		rightF: number,
+		rightG: number,
+		rightState: number
+	): boolean {
+		return leftF !== rightF ? leftF < rightF : leftG !== rightG ? leftG < rightG : leftState < rightState;
+	}
+
+	/** Insert one state, sifting up to preserve the heap order. */
+	push(state: number, g: number, f: number): void {
+		this.#reserveHeap(this.#size + 1);
+		const states = this.#heapState;
+		const costs = this.#heapF;
+		const depths = this.#heapG;
+		let index = this.#size;
+		this.#size += 1;
 		while (index > 0) {
 			const parent = (index - 1) >> 1;
-			if (!RouteHeap.before(item, this.#items[parent]!)) break;
-			this.#items[index] = this.#items[parent]!;
+			if (!RouterArena.before(f, g, state, costs[parent]!, depths[parent]!, states[parent]!)) break;
+			states[index] = states[parent]!;
+			costs[index] = costs[parent]!;
+			depths[index] = depths[parent]!;
 			index = parent;
 		}
-		this.#items[index] = item;
+		states[index] = state;
+		costs[index] = f;
+		depths[index] = g;
 	}
 
-	pop(): { state: number; cell: number; direction: number; g: number; f: number } | undefined {
-		const first = this.#items[0];
-		const last = this.#items.pop();
-		if (first === undefined || last === undefined || this.#items.length === 0) return first;
+	/**
+	 * Remove the cheapest state into {@link poppedState} and {@link poppedG}.
+	 *
+	 * Returning through fields rather than an object is the point: this runs
+	 * once per expansion, and an allocated result would reintroduce exactly the
+	 * garbage the arena exists to avoid.
+	 */
+	pop(): void {
+		const states = this.#heapState;
+		const costs = this.#heapF;
+		const depths = this.#heapG;
+		this.poppedState = states[0]!;
+		this.poppedG = depths[0]!;
+		this.#size -= 1;
+		const size = this.#size;
+		if (size === 0) return;
+		const lastState = states[size]!;
+		const lastF = costs[size]!;
+		const lastG = depths[size]!;
 		let index = 0;
 		while (true) {
 			const left = index * 2 + 1;
-			if (left >= this.#items.length) break;
+			if (left >= size) break;
 			const right = left + 1;
 			const child =
-				right < this.#items.length && RouteHeap.before(this.#items[right]!, this.#items[left]!)
+				right < size &&
+				RouterArena.before(costs[right]!, depths[right]!, states[right]!, costs[left]!, depths[left]!, states[left]!)
 					? right
 					: left;
-			if (!RouteHeap.before(this.#items[child]!, last)) break;
-			this.#items[index] = this.#items[child]!;
+			if (!RouterArena.before(costs[child]!, depths[child]!, states[child]!, lastF, lastG, lastState)) break;
+			states[index] = states[child]!;
+			costs[index] = costs[child]!;
+			depths[index] = depths[child]!;
 			index = child;
 		}
-		this.#items[index] = last;
-		return first;
+		states[index] = lastState;
+		costs[index] = lastF;
+		depths[index] = lastG;
 	}
 
-	static before(
-		left: { state: number; g: number; f: number },
-		right: { state: number; g: number; f: number }
-	): boolean {
-		return left.f !== right.f
-			? left.f < right.f
-			: left.g !== right.g
-				? left.g < right.g
-				: left.state < right.state;
+	/**
+	 * Whether a popped entry still describes the best route to its state.
+	 *
+	 * A state can be pushed several times as cheaper routes to it are found; the
+	 * stale copies must be discarded when they surface.
+	 */
+	current(state: number, g: number): boolean {
+		return this.#stamp[state] === this.#epoch && this.#g[state] === g;
+	}
+
+	/**
+	 * Whether reaching `state` at cost `g` improves on what is known.
+	 *
+	 * An unvisited state is treated as costing infinity rather than as an
+	 * automatic improvement, and the distinction is load-bearing: `wireSegmentCost`
+	 * returns `Infinity` for a contact the validator would reject, so an edge that
+	 * cannot legally be laid arrives here with `g === Infinity`. Comparing against
+	 * an infinite baseline refuses it — `Infinity < Infinity` is false — exactly as
+	 * the retired `g >= (gScore.get(state) ?? Number.POSITIVE_INFINITY)` did.
+	 * Treating "never seen" as improvable instead admits the illegal edge, and the
+	 * router then returns routes that overlap; only congested documents notice,
+	 * because only they price a contact that high.
+	 */
+	improves(state: number, g: number): boolean {
+		const known = this.#stamp[state] === this.#epoch ? this.#g[state]! : Number.POSITIVE_INFINITY;
+		return g < known;
+	}
+
+	/** Record a better route to `state`, arriving from `from`. */
+	relax(state: number, from: number, g: number): void {
+		this.#g[state] = g;
+		this.#previous[state] = from;
+		this.#stamp[state] = this.#epoch;
+	}
+
+	/** Seed the start state, which has no predecessor. */
+	seed(state: number, f: number): void {
+		this.relax(state, NO_STATE, 0);
+		this.push(state, 0, f);
+	}
+
+	/** Predecessor of `state`, or {@link NO_STATE} at the start. */
+	predecessor(state: number): number {
+		return this.#previous[state]!;
 	}
 }
+
+/**
+ * One arena, reused for every route in the process.
+ *
+ * The router is synchronous and single-threaded, and a route never outlives the
+ * call that produced it, so a shared arena is safe and keeps a document's
+ * hundredth route as cheap as its first. It also survives rip-up: a retry pass
+ * reuses the columns the first pass sized.
+ */
+const routerArena = new RouterArena();
 
 /**
  * Ascending, de-duplicated candidate coordinates for one axis.
@@ -1881,67 +2068,72 @@ function searchOrthogonalRoute(
 	const startY = ys.indexOf(start.y);
 	const endX = xs.indexOf(end.x);
 	const endY = ys.indexOf(end.y);
+	const height = ys.length;
 	const startCell = startY * width + startX;
 	const endCell = endY * width + endX;
-	const stateId = (cell: number, direction: number) => cell * 3 + direction;
-	const gScore = new Map<number, number>();
-	const previous = new Map<number, number>();
-	const heap = new RouteHeap();
-	const startState = stateId(startCell, 0);
-	gScore.set(startState, 0);
-	heap.push({
-		state: startState,
-		cell: startCell,
-		direction: 0,
-		g: 0,
-		f: Math.abs(start.x - end.x) + Math.abs(start.y - end.y)
-	});
+	const arena = routerArena;
+	arena.begin(width * height);
+	const startState = startCell * ROUTER_DIRECTIONS;
+	arena.seed(startState, Math.abs(start.x - end.x) + Math.abs(start.y - end.y));
+	/*
+	 * Two scratch points, reused for every edge this search prices.
+	 *
+	 * `indexedSegmentCollision` and `wireSegmentCost` read coordinates and
+	 * retain nothing, so one pair serves the whole search instead of a pair per
+	 * neighbour — four allocations per expansion, on a loop that runs tens of
+	 * thousands of times. A callee that ever stored one of these would see it
+	 * mutate underneath; `the router prices an edge without allocating` in
+	 * tests/router-arena.test.ts is what holds that invariant.
+	 */
+	const from: SchematicPoint = { x: 0, y: 0 };
+	const to: SchematicPoint = { x: 0, y: 0 };
 	let expanded = 0;
 	let finalState: number | undefined;
-	while (heap.size > 0 && expanded < MAX_ROUTER_STATES) {
-		const current = heap.pop()!;
-		if (current.g !== gScore.get(current.state)) continue;
-		if (current.cell === endCell) {
-			finalState = current.state;
+	while (arena.size > 0 && expanded < MAX_ROUTER_STATES) {
+		arena.pop();
+		const currentState = arena.poppedState;
+		const currentG = arena.poppedG;
+		if (!arena.current(currentState, currentG)) continue;
+		const currentCell = Math.floor(currentState / ROUTER_DIRECTIONS);
+		if (currentCell === endCell) {
+			finalState = currentState;
 			break;
 		}
 		expanded += 1;
-		const xIndex = current.cell % width;
-		const yIndex = Math.floor(current.cell / width);
-		const from = { x: xs[xIndex]!, y: ys[yIndex]! };
-		const neighbors = [
-			[xIndex - 1, yIndex, 1],
-			[xIndex + 1, yIndex, 1],
-			[xIndex, yIndex - 1, 2],
-			[xIndex, yIndex + 1, 2]
-		] as const;
-		for (const [nextX, nextY, direction] of neighbors) {
-			if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= ys.length) continue;
-			const to = { x: xs[nextX]!, y: ys[nextY]! };
+		const currentDirection = currentState - currentCell * ROUTER_DIRECTIONS;
+		const xIndex = currentCell % width;
+		const yIndex = Math.floor(currentCell / width);
+		from.x = xs[xIndex]!;
+		from.y = ys[yIndex]!;
+		/*
+		 * The four orthogonal neighbours, unrolled. This was a fresh tuple array
+		 * of tuples per expansion; the arithmetic below yields the same order —
+		 * west, east, north, south — which the heap's `state` tiebreak makes
+		 * observable, so it is not free to change.
+		 */
+		for (let step = 0; step < 4; step += 1) {
+			const nextX = xIndex + (step === 0 ? -1 : step === 1 ? 1 : 0);
+			const nextY = yIndex + (step === 2 ? -1 : step === 3 ? 1 : 0);
+			if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= height) continue;
+			const direction = step < 2 ? 1 : 2;
+			to.x = xs[nextX]!;
+			to.y = ys[nextY]!;
 			if (indexedSegmentCollision(index, from, to, fromId, toId, 'route')) continue;
-			const cell = nextY * width + nextX;
-			const state = stateId(cell, direction);
-			const bend = current.direction !== 0 && current.direction !== direction;
+			const state = (nextY * width + nextX) * ROUTER_DIRECTIONS + direction;
+			const bend = currentDirection !== 0 && currentDirection !== direction;
 			const g =
-				current.g +
+				currentG +
 				Math.abs(from.x - to.x) +
 				Math.abs(from.y - to.y) +
 				(bend ? ROUTER_BEND_PENALTY : 0) +
 				wireSegmentCost(index, from, to, connection);
-			if (g >= (gScore.get(state) ?? Number.POSITIVE_INFINITY)) continue;
-			gScore.set(state, g);
-			previous.set(state, current.state);
-			heap.push({
-				state,
-				cell,
-				direction,
-				g,
-				f: g + Math.abs(to.x - end.x) + Math.abs(to.y - end.y)
-			});
+			if (!arena.improves(state, g)) continue;
+			arena.relax(state, currentState, g);
+			arena.push(state, g, g + Math.abs(to.x - end.x) + Math.abs(to.y - end.y));
 		}
 	}
 	/* v8 ignore next -- exercising the hard ceiling would make the unit suite allocate 40,000 states. */
-	if (finalState === undefined && heap.size > 0 && expanded >= MAX_ROUTER_STATES) {
+	if (finalState === undefined && arena.size > 0 && expanded >= MAX_ROUTER_STATES) {
 		throw new SchematicSyntaxError(
 			`Orthogonal routing complexity exceeds ${MAX_ROUTER_STATES.toLocaleString('en-US')} search states.`,
 			connection.line
@@ -1949,11 +2141,9 @@ function searchOrthogonalRoute(
 	}
 	if (finalState === undefined) return undefined;
 	const reversed: SchematicPoint[] = [];
-	let state: number | undefined = finalState;
-	while (state !== undefined) {
-		const cell = Math.floor(state / 3);
+	for (let state = finalState; state !== NO_STATE; state = arena.predecessor(state)) {
+		const cell = Math.floor(state / ROUTER_DIRECTIONS);
 		reversed.push({ x: xs[cell % width]!, y: ys[Math.floor(cell / width)]! });
-		state = previous.get(state);
 	}
 	return compactOrthogonalPoints(reversed.reverse());
 }
