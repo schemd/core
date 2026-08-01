@@ -163,9 +163,67 @@ const mutants = [
 	{
 		name: 'the routing attempt budget is enforced',
 		file: 'src/layout.ts',
-		from: '\t\tif (pass >= routingAttempts || failedAt === 0) throw failure;',
-		to: '\t\tif (failedAt === 0) throw failure;',
+		from: '\t\tif (pass >= routingAttempts) {',
+		to: '\t\tif (pass >= routingAttempts + 1) {',
 		tests: ['tests/rip-up.test.ts']
+	},
+	{
+		name: 'a budget of one retry withholds the bundle path',
+		file: 'src/layout.ts',
+		from: '\t\t\t\troutingAttempts > 1 ? routeNudgedBundle(connections, components) : undefined;',
+		to: '\t\t\t\troutingAttempts > 0 ? routeNudgedBundle(connections, components) : undefined;',
+		tests: ['tests/rip-up.test.ts', 'tests/nudging.test.ts']
+	},
+	{
+		name: 'the bundle is ranked by the row each trace leaves from',
+		file: 'src/layout.ts',
+		from: '\t\t.sort((left, right) => escapes[left]!.start.y - escapes[right]!.start.y);',
+		to: '\t\t.sort((left, right) => left - right);',
+		tests: ['tests/nudging.test.ts']
+	},
+	{
+		name: 'each trace in a bundle turns on its own column',
+		file: 'src/layout.ts',
+		from: '\t\tconst inset = ROUTER_CHANNEL_PITCH * (rank + 1);',
+		to: '\t\tconst inset = ROUTER_CHANNEL_PITCH;',
+		tests: ['tests/nudging.test.ts']
+	},
+	{
+		name: 'each trace in a bundle crosses on its own row',
+		file: 'src/layout.ts',
+		from: '\t\t\tconst midRow = band + (rank - (count - 1) / 2) * ROUTER_CHANNEL_PITCH;',
+		to: '\t\t\tconst midRow = band;',
+		tests: ['tests/nudging.test.ts']
+	},
+	{
+		name: 'a bundle refuses a middle row outside the trace it belongs to',
+		file: 'src/layout.ts',
+		from: '\t\t\tif (midRow <= lowRow || midRow >= highRow) return undefined;',
+		to: '\t\t\tif (false) return undefined;',
+		tests: ['tests/nudging.test.ts']
+	},
+	/*
+	 * Deliberately absent: a mutant for the crossed-column early-out. Removing that
+	 * guard changes no observable behaviour on any document the suite can build —
+	 * a bundle narrow enough to cross its own columns is also congested enough that
+	 * the obstacle and occupancy checks below reject the folded route a moment
+	 * later. The guard earns its place by refusing an inside-out drawing directly
+	 * rather than by accident, but a mutant nothing can distinguish is noise in the
+	 * gate, which is the reason 0.6.0 removed one for the same reason.
+	 */
+	{
+		name: 'a bundle is verified against component obstacles',
+		file: 'src/layout.ts',
+		from: '\t\tif (routeIntersectsObstacles(points, index, from.component.id, to.component.id)) {',
+		to: '\t\tif (false) {',
+		tests: ['tests/nudging.test.ts']
+	},
+	{
+		name: 'a mixed-curve bundle is never nudged',
+		file: 'src/layout.ts',
+		from: "\tif (connections.some((connection) => connection.curve !== 'ortho')) return undefined;",
+		to: "\tif (connections.some((connection) => connection.curve === 'never')) return undefined;",
+		tests: ['tests/nudging.test.ts']
 	},
 	{
 		name: 'congestion cells are reported in a stable order',

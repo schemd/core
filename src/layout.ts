@@ -2868,6 +2868,16 @@ export interface SchematicRoutingReport {
 	}[];
 	/** Occupied cells only, ordered by column then row. */
 	readonly congestion: readonly SchematicCongestionCell[];
+	/**
+	 * Whether the bundle was laid out together after reordering was exhausted.
+	 *
+	 * False for every document that routes greedily, which is every document that
+	 * compiled before 0.7. True means rip-up spent its whole budget and the traces
+	 * were then assigned channels as a set — the path that routes a reversal bus
+	 * wider than twelve. A host showing routing diagnostics can treat it as "this
+	 * diagram is congested enough that declaration order stopped mattering".
+	 */
+	readonly nudged: boolean;
 }
 
 /**
@@ -2914,6 +2924,179 @@ function connectionSpan(
 }
 
 /**
+ * Lay one bundle of contending traces out together instead of one at a time.
+ *
+ * ## Why this exists
+ *
+ * Greedy routing decides each trace on its own merits, and on a bus that is the
+ * whole problem: the first wire takes the short central channel because nothing
+ * stops it, and every wire after it inherits a worse canvas. Rip-up reorders who
+ * chooses first, but somebody still chooses first, so reordering cannot reach a
+ * layout in which *no* wire takes the middle. 0.5.0 searched twenty thousand
+ * orders at thirteen wires and concluded the channel model was full.
+ *
+ * It is not full. A twelve-unit pitch across this channel admits legal routings
+ * for at least thirty-two wires; what it does not admit is *greedy* ones. The
+ * assignment has to be made for the bundle at once, which is what this does.
+ *
+ * ## The shape
+ *
+ * Every trace takes the same five-segment dogleg, and the bundle differs only in
+ * where each one turns:
+ *
+ * ```text
+ *   start ── A_k ┐                          rank k gets column A_k on the way out,
+ *                └──── mid_k ────┐          row mid_k across the middle, and
+ *                                └─ B_k ──  end   column B_k on the way in
+ * ```
+ *
+ * `A_k` steps inward from the source side by rank and `B_k` inward from the
+ * target side, so two traces never turn on the same column; `mid_k` spreads the
+ * middle runs across the band the bundle shares. A wire that would double back
+ * to reach its row is refused rather than drawn, which is what keeps the shape
+ * honest on bundles that are not buses.
+ *
+ * ## What it does not do
+ *
+ * This is a rescue, not a replacement. It runs only after rip-up has exhausted
+ * its budget, so every document that compiles today reaches the same routes
+ * through the same code and is byte-identical. It requires a bundle that is
+ * entirely orthogonal — a `line` or `bezier` in the set leaves the shape
+ * meaningless — and it verifies every trace it produces against the same
+ * obstacle and contact predicates the greedy router uses. If any check fails the
+ * bundle is abandoned and the caller's original diagnostic stands.
+ *
+ * @param connections - Every connection in the document, in source order.
+ * @param components - Complete component map.
+ * @returns Routes in source order and the index that accepted them, or
+ *   `undefined` when the bundle does not admit this shape.
+ */
+function routeNudgedBundle(
+	connections: readonly SchematicConnection[],
+	components: ReadonlyMap<string, SchematicComponent>
+): { readonly routes: RoutedConnection[]; readonly index: RoutingIndex } | undefined {
+	/* No guard on bundle size: the caller reaches this only when a trace failed
+	   with at least one placed before it, so a bundle is never shorter than two. */
+	if (connections.some((connection) => connection.curve !== 'ortho')) return undefined;
+
+	/* Escape points are where the shape actually begins; the terminal stub in
+	   front of them is reserved for every trace before any is placed. */
+	const escapes = connections.map((connection) => {
+		const from = endpointGeometry(connection.from, components);
+		const to = endpointGeometry(connection.to, components);
+		return {
+			from,
+			to,
+			start: escapePoint(from, componentObstacleRectangle(from.component)),
+			end: escapePoint(to, componentObstacleRectangle(to.component))
+		};
+	});
+
+	/*
+	 * Rank is the whole algorithm, so it is a pure function of geometry: traces are
+	 * ordered by the row they leave from, and two documents that declare the same
+	 * bus in different orders receive the same layout.
+	 *
+	 * One comparison, not three. Ties fall back to declaration order because the
+	 * list starts in declaration order and `sort` has been required to be stable
+	 * since ES2019 — an explicit `|| left - right` would be dead code that reads
+	 * like a safeguard, which is worse than none.
+	 */
+	const ranking = connections
+		.map((_, index) => index)
+		.sort((left, right) => escapes[left]!.start.y - escapes[right]!.start.y);
+	/* The row the bundle crosses together. Individual midpoints are spread around
+	   this rather than around each trace's own centre, so a bundle whose spans
+	   differ still lands on one set of distinct middle rows. */
+	let bandTotal = 0;
+	for (const escape of escapes) bandTotal += (escape.start.y + escape.end.y) / 2;
+	const band = bandTotal / escapes.length;
+	const count = connections.length;
+
+	const index = createRoutingIndex(components, connections);
+	const routes: RoutedConnection[] = new Array(count);
+	for (const [rank, original] of ranking.entries()) {
+		const connection = connections[original]!;
+		const { from, to, start, end } = escapes[original]!;
+		const inset = ROUTER_CHANNEL_PITCH * (rank + 1);
+		const middle: SchematicPoint[] = [];
+		if (start.y === end.y) {
+			/* Already level: a straight run needs no dogleg, and inventing one
+			   would cross every trace that legitimately owns a middle row. */
+			middle.push(start, end);
+		} else {
+			const towards = end.x >= start.x ? 1 : -1;
+			const columnA = start.x + towards * inset;
+			const columnB = end.x - towards * inset;
+			const midRow = band + (rank - (count - 1) / 2) * ROUTER_CHANNEL_PITCH;
+			const lowRow = Math.min(start.y, end.y);
+			const highRow = Math.max(start.y, end.y);
+			/* Refuse rather than double back. A middle row outside the trace's own
+			   span produces a legal but absurd path, and on a bundle that is not a
+			   bus it is the common case — so it is the signal to abandon. */
+			if (midRow <= lowRow || midRow >= highRow) return undefined;
+			if ((columnB - columnA) * towards <= 0) return undefined;
+			middle.push(
+				start,
+				{ x: columnA, y: start.y },
+				{ x: columnA, y: midRow },
+				{ x: columnB, y: midRow },
+				{ x: columnB, y: end.y },
+				end
+			);
+		}
+		/*
+		 * No bounds check. Every point this emits lies inside the bounding box of
+		 * the two escape points — columns are inset from each end and the crossing
+		 * guard above keeps them from passing each other, and the middle row is
+		 * required to sit between the two terminal rows. Both escapes hang off
+		 * bodies the parser already validated against the fence, so a point outside
+		 * it is unreachable, and a guard for it would be untestable scaffolding.
+		 */
+		const points = compactOrthogonalPoints([from.point, ...middle, to.point]);
+		/* Verified with the router's own predicates rather than a second opinion:
+		   nothing may clip a body, and every contact must be one the validator
+		   will accept when it sees the same geometry a moment from now. */
+		if (routeIntersectsObstacles(points, index, from.component.id, to.component.id)) {
+			return undefined;
+		}
+		/*
+		 * A postcondition, kept because it is cheap and the alternative is silence.
+		 * The construction gives every trace its own outbound column, its own
+		 * inbound column and its own middle row, so two members of a bundle can
+		 * only ever meet at a strict perpendicular crossing — the contact the
+		 * validator permits. Nothing reaches this branch today, and if a future
+		 * change to the shape makes it reachable, abandoning the bundle is what
+		 * keeps illegal copper out of the drawing rather than into it.
+		 */
+		/* v8 ignore next 3 -- postcondition; distinct columns and rows exclude it. */
+		if (routeOccupancyCost(points, index, connection) === Number.POSITIVE_INFINITY) {
+			return undefined;
+		}
+		/*
+		 * A marker that will not fit is reported, not swallowed. The bundle has
+		 * already been proved legal by this point, so the document does route — and
+		 * answering "no orthogonal route exists" because an arrowhead is too large
+		 * would send the author looking for a contention problem they do not have.
+		 */
+		const route = validateMarkerCollisions(
+			connection,
+			{
+				curve: 'ortho',
+				d: orthogonalPath(points),
+				points: points as [SchematicPoint, SchematicPoint, ...SchematicPoint[]]
+			},
+			index,
+			from.component.id,
+			to.component.id
+		);
+		routes[original] = route;
+		indexCompletedRoute(index, route, connection, original);
+	}
+	return { routes, index };
+}
+
+/**
  * Route every trace, tearing up earlier ones when a later one has nowhere to go.
  *
  * The greedy source-order pass this wraps is unchanged and is still what runs for
@@ -2957,6 +3140,7 @@ function routeWithRipUp(
 	readonly index: RoutingIndex;
 	readonly attempts: number;
 	readonly rippedUp: readonly { readonly connectionIndex: number; readonly attempt: number }[];
+	readonly nudged?: boolean;
 } {
 	/** Traces promoted by an earlier failure, highest priority first. */
 	const promoted: number[] = [];
@@ -3011,12 +3195,34 @@ function routeWithRipUp(
 			}
 		}
 		if (failedAt === -1) {
-			return { routes, index, attempts: pass - 1, rippedUp };
+			return { routes, index, attempts: pass - 1, rippedUp, nudged: false };
 		}
 		/* A trace that fails with nothing placed before it fails on its own terms —
 		   its endpoints are unreachable, not contended — so there is nothing to tear
 		   up and the diagnostic it already raised is the right one. */
-		if (pass >= routingAttempts || failedAt === 0) throw failure;
+		if (failedAt === 0) throw failure;
+		if (pass >= routingAttempts) {
+			/*
+			 * Reordering is spent. Contention that survives every order is the
+			 * signature of a bundle that no greedy pass can lay out, so the last
+			 * thing tried is laying the whole bundle out at once.
+			 *
+			 * Not when the host allowed no retries at all. `routingAttempts: 1` is
+			 * documented as restoring pre-0.5 routing exactly, and a budget of one
+			 * has nothing to exhaust — reaching a second strategy through it would
+			 * make that promise false.
+			 */
+			const nudged =
+				routingAttempts > 1 ? routeNudgedBundle(connections, components) : undefined;
+			if (nudged === undefined) throw failure;
+			return {
+				routes: nudged.routes,
+				index: nudged.index,
+				attempts: pass,
+				rippedUp,
+				nudged: true
+			};
+		}
 		for (const connectionIndex of order.slice(0, failedAt)) {
 			rippedUp.push({ connectionIndex, attempt: pass });
 		}
@@ -3218,7 +3424,8 @@ export function routeSchematicConnections(
 		report: {
 			attempts: attempt.attempts,
 			rippedUp: attempt.rippedUp,
-			congestion: congestionMap(spatialIndex)
+			congestion: congestionMap(spatialIndex),
+			nudged: attempt.nudged === true
 		}
 	};
 }
@@ -3664,7 +3871,8 @@ export function validateSchematicGeometry(
 export const EMPTY_ROUTING_REPORT: SchematicRoutingReport = Object.freeze({
 	attempts: 0,
 	rippedUp: Object.freeze([]),
-	congestion: Object.freeze([])
+	congestion: Object.freeze([]),
+	nudged: false
 });
 
 /**

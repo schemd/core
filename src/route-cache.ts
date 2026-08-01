@@ -65,7 +65,8 @@ const NO_EVIDENCE: {
 	routing: Object.freeze({
 		attempts: 0,
 		rippedUp: Object.freeze([]),
-		congestion: Object.freeze([])
+		congestion: Object.freeze([]),
+		nudged: false
 	})
 });
 

@@ -259,38 +259,41 @@ export function corpusDocuments() {
 /**
  * Compile one document to a digest.
  *
- * The digest covers the SVG *and* the derived artifacts a host can observe, so
- * a refactor that changed the source map, the placements or the routing report
- * while leaving the markup alone is still caught.
+ * The drawing and the evidence are hashed *separately*, because they fail for
+ * different reasons and only one of them is a picture changing. Adding a field
+ * to the routing report moves every evidence digest in the corpus while every
+ * compiled byte stays identical — reported as one combined hash that reads as
+ * "210 of 261 documents changed", which is indistinguishable from a routing
+ * regression and teaches a reviewer to rebaseline without looking. Split, the
+ * same change reports as no drawings and every evidence, and says what happened.
  *
  * @param entry - One corpus document.
- * @returns A stable `sha256` over the observable result, compiled or rejected.
+ * @returns Stable `sha256` digests of the drawing and of the derived evidence.
  */
 export function digestDocument(entry) {
-	const hash = createHash('sha256');
+	const drawing = createHash('sha256');
+	const evidence = createHash('sha256');
 	try {
 		const result = compileSchematic(entry.source, {
 			...entry.fence,
 			mode: entry.mode,
 			...(entry.semanticHooks ? { semanticHooks: entry.semanticHooks } : {})
 		});
-		hash.update('ok ');
-		hash.update(result.svg);
-		hash.update(' sourceMap ');
-		hash.update(JSON.stringify(result.sourceMap ?? null));
-		hash.update(' placements ');
-		hash.update(JSON.stringify(result.placements ?? null));
-		hash.update(' routing ');
-		hash.update(JSON.stringify(result.routing ?? null));
+		drawing.update('ok ');
+		drawing.update(result.svg);
+		evidence.update(JSON.stringify(result.sourceMap ?? null));
+		evidence.update(JSON.stringify(result.placements ?? null));
+		evidence.update(JSON.stringify(result.routing ?? null));
 	} catch (error) {
 		/* The diagnostic is the observable result. Its text and its line are
 		   both contract, so both go into the digest. */
-		hash.update('error ');
-		hash.update(String(error?.message ?? error));
-		hash.update(' line ');
-		hash.update(String(error?.line ?? ''));
+		drawing.update('error ');
+		drawing.update(String(error?.message ?? error));
+		drawing.update(' line ');
+		drawing.update(String(error?.line ?? ''));
+		evidence.update('rejected');
 	}
-	return hash.digest('hex');
+	return { drawing: drawing.digest('hex'), evidence: evidence.digest('hex') };
 }
 
 /** Digest the whole corpus. */
@@ -312,17 +315,36 @@ if (isMain) {
 		process.exit(1);
 	} else {
 		const baseline = JSON.parse(readFileSync(BASELINE, 'utf8'));
-		const drift = [];
+		const movedDrawing = [];
+		const movedEvidence = [];
+		const structural = [];
 		for (const [name, digest] of Object.entries(digests)) {
-			if (baseline[name] === undefined) drift.push(`+ ${name} (new)`);
-			else if (baseline[name] !== digest) drift.push(`~ ${name} (changed)`);
+			const was = baseline[name];
+			if (was === undefined) {
+				structural.push(`+ ${name} (new)`);
+				continue;
+			}
+			if (was.drawing !== digest.drawing) movedDrawing.push(name);
+			else if (was.evidence !== digest.evidence) movedEvidence.push(name);
 		}
 		for (const name of Object.keys(baseline)) {
-			if (digests[name] === undefined) drift.push(`- ${name} (missing)`);
+			if (digests[name] === undefined) structural.push(`- ${name} (missing)`);
 		}
-		if (drift.length > 0) {
-			console.error(`Corpus drift in ${drift.length} of ${count} documents:`);
-			for (const line of drift.slice(0, 40)) console.error(`  ${line}`);
+		if (movedDrawing.length + movedEvidence.length + structural.length > 0) {
+			console.error(`Corpus drift across ${count} documents:`);
+			/* Drawings first and loudest: a moved drawing is a picture that changed. */
+			if (movedDrawing.length > 0) {
+				console.error(`  drawings changed: ${movedDrawing.length}`);
+				for (const name of movedDrawing.slice(0, 25)) console.error(`    ~ ${name}`);
+			}
+			if (movedEvidence.length > 0) {
+				console.error(
+					`  evidence only (drawing identical): ${movedEvidence.length}` +
+						' — source map, placements or routing report'
+				);
+				for (const name of movedEvidence.slice(0, 5)) console.error(`    ~ ${name}`);
+			}
+			for (const line of structural.slice(0, 20)) console.error(`  ${line}`);
 			process.exit(1);
 		}
 		console.log(`${count} corpus documents byte-identical to baseline.`);
