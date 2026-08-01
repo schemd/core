@@ -69,18 +69,28 @@ describe('a reversal bus routes past the old ceiling', () => {
 	/*
 	 * 0.4.0 took this from three wires to ten and documented ten as the limit:
 	 * "a full reversal bus compiles to ten wires and is rejected beyond that."
-	 * Eleven and twelve are the widths rip-up adds. Thirteen is *not* an ordering
-	 * problem and is asserted as such below — see `the ceiling that remains`.
+	 * Eleven and twelve are the widths rip-up adds — that is, the widths *ordering*
+	 * alone can reach. Everything past twelve needs the bundle laid out at once;
+	 * see `the ceiling that was not a ceiling` below.
 	 */
-	test.each([11, 12])('compiles %i wires', (count) => {
+	test.each([11, 12])('compiles %i wires by reordering alone', (count) => {
 		const compilation = compileSchematic(crossbar(count), fence);
 		expect(compilation.document.connections).toHaveLength(count);
 		expect(compilation.metrics.connections).toBe(count);
+		expect(compilation.routing.nudged).toBe(false);
 	});
 
 	test('reports the traces it tore up to get there', () => {
 		const compilation = compileSchematic(crossbar(12), fence);
 		expect(compilation.routing.attempts).toBeGreaterThan(0);
+		/*
+		 * Twelve is the widest that *reordering alone* reaches, so it must get there
+		 * on promotion and not be rescued by the bundle path. Without this the
+		 * promotion mutant survives: break which trace retries first and the bundle
+		 * quietly catches the document, turning a routing defect into a pass. This
+		 * is the hazard 0.5.0 recorded for rip-up, one layer further down.
+		 */
+		expect(compilation.routing.nudged).toBe(false);
 		expect(compilation.routing.rippedUp.length).toBeGreaterThan(0);
 		/* Every entry names a real connection and the retry that tore it up. */
 		for (const entry of compilation.routing.rippedUp) {
@@ -92,36 +102,54 @@ describe('a reversal bus routes past the old ceiling', () => {
 
 	test('honours the attempt budget and still names the contention', () => {
 		/* With retries disabled the old diagnostic is what a contended bus reaches,
-		   and it must still be the one that says how to free a channel. */
+		   and it must still be the one that says how to free a channel. A budget of
+		   one also withholds the bundle path, which exists to rescue exhausted
+		   retries and has nothing to rescue when none were permitted. */
 		expect(() =>
 			compileSchematic(crossbar(12), { ...fence, limits: { routingAttempts: 1 } })
 		).toThrow(/No orthogonal route from .* clears every component and earlier trace/);
 	});
 });
 
-describe('the ceiling that remains', () => {
+describe('the ceiling that was not a ceiling', () => {
 	/*
-	 * Thirteen wires is where this stops, and the reason matters: it is a limit of
-	 * the router's channel model, not of the order traces are placed in. Widening
-	 * the fence changes nothing, and twenty thousand random declaration orders were
-	 * searched at this width without finding one that routes — so no reordering
-	 * heuristic, this one included, can reach it. Pinned here so the claim in the
-	 * README stays honest and a future channel-model change has a target.
+	 * This suite used to assert that thirteen wires is unroutable, and explained it
+	 * as a limit of the channel model rather than of declaration order. The
+	 * evidence was twenty thousand declaration orders, none of which routed — but
+	 * the conclusion did not follow from it. Reordering decides which trace chooses
+	 * first; it cannot reach a layout in which *no* trace takes the middle channel,
+	 * because somebody always chooses first.
+	 *
+	 * The model was never full. The same fence at the same pitch admits legal
+	 * routings well past thirty wires once the bundle is assigned channels as a
+	 * set. `tests/nudging.test.ts` owns that behaviour and proves the drawings are
+	 * legal rather than merely produced; what remains here is the budget contract.
 	 */
-	test('thirteen wires is unroutable at any budget', () => {
-		for (const routingAttempts of [1, 12, 32]) {
-			expect(() => compileSchematic(crossbar(13), { ...fence, limits: { routingAttempts } })).toThrow(
-				/No orthogonal route from/
-			);
+	test('thirteen wires routes once retries are allowed to be exhausted', () => {
+		for (const routingAttempts of [12, 32]) {
+			const result = compileSchematic(crossbar(13), { ...fence, limits: { routingAttempts } });
+			expect(result.routing.nudged).toBe(true);
+			expect(result.svg).toContain('<svg');
 		}
 	});
 
-	test('and is not fixed by a wider canvas', () => {
+	test('spends the whole retry budget before laying the bundle out', () => {
+		/*
+		 * The bundle path is a last resort, not a shortcut. A document that reaches
+		 * it must have used every pass the host allowed first — so `attempts`
+		 * equals the budget exactly, and a router that gave up early or ran on
+		 * would disagree here.
+		 */
+		for (const routingAttempts of [3, 7]) {
+			const result = compileSchematic(crossbar(13), { ...fence, limits: { routingAttempts } });
+			expect(result.routing.nudged).toBe(true);
+			expect(result.routing.attempts).toBe(routingAttempts);
+		}
+	});
+
+	test('and is still refused when the host allows no retries', () => {
 		expect(() =>
-			compileSchematic(crossbar(13, 140, 3000), {
-				bounds: { width: 3400, height: 2600 },
-				title: 'wide'
-			})
+			compileSchematic(crossbar(13), { ...fence, limits: { routingAttempts: 1 } })
 		).toThrow(/No orthogonal route from/);
 	});
 });
@@ -288,7 +316,7 @@ describe('the reporting router', () => {
 					).routes[index]!
 			)
 		]);
-		expect(handed.report).toEqual({ attempts: 0, rippedUp: [], congestion: [] });
+		expect(handed.report).toEqual({ attempts: 0, rippedUp: [], congestion: [], nudged: false });
 	});
 
 	test('reports nothing for a document it never parsed', () => {
@@ -305,7 +333,7 @@ describe('the reporting router', () => {
 		};
 		expect(parsedSchematicEvidence(copy)).toEqual({
 			placements: [],
-			routing: { attempts: 0, rippedUp: [], congestion: [] }
+			routing: { attempts: 0, rippedUp: [], congestion: [], nudged: false }
 		});
 	});
 

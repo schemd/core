@@ -61,7 +61,7 @@ And the output is readable back. `snapshotSchematic` writes a text digest of the
 Please read the [limitations](https://schemd.johnowolabiidogun.dev/docs/0.6/overview#limitations) before treating a clean compile as an engineering result. The short version:
 
 - **`verifyNetlist` is structural linting, not verification.** It cannot tell you anything about analog correctness, timing, impedance, drive strength, metastability, or quantum validity. A clean result means no rule fired.
-- **Routing is greedy and bounded.** It retries around contention, which takes a full reversal bus to twelve wires. Thirteen is unroutable and no reordering reaches it — that is a limit of the channel model, not of declaration order.
+- **Routing is greedy and bounded.** Traces are placed one at a time and retried around contention, which takes a full reversal bus to twelve wires. Past that the bundle is laid out as a set instead, which reaches thirty-two. A document that needs the bundle path reports `routing.nudged`. **Correction:** 0.5 documented thirteen wires as a limit of the channel model rather than of declaration order. That was wrong — reordering genuinely cannot reach it, but the model was never full.
 - **The model is flat.** No hierarchy, no sub-sheets, no simulation, no timing analysis, no certification. It suits documentation, teaching, and schematics rather than large engineering designs.
 - **Compiling source you did not write?** Pass [`limits`](https://schemd.johnowolabiidogun.dev/docs/0.6/limits) and a timeout of your own.
 - **Published performance figures are narrow.** Warm medians on one machine. Run `bun run benchmark` on yours.

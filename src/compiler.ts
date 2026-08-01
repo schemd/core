@@ -1,9 +1,9 @@
 /** One-pass compiler facade for hosts that do not need the parser and renderer separately. */
 import type { SchematicRoutingReport } from './layout.js';
-import { resolveSchematicLimits, utf8ByteLength } from './limits.js';
+import { resolveSchematicLimits } from './limits.js';
 import { assertParsedSchematicDocument, parseSchematic } from './parser.js';
 import type { SchematicPlacement } from './placement.js';
-import { renderSchematic } from './renderer.js';
+import { renderSchematicSized } from './renderer.js';
 import { parsedSchematicEvidence } from './route-cache.js';
 import type { CompileSchematicOptions, SchematicDocument } from './types.js';
 
@@ -111,7 +111,7 @@ export function compileSchematic(source: string, options: CompileSchematicOption
 		limits: resolveSchematicLimits(options.limits)
 	};
 	const document = parseSchematic(source, settled);
-	const svg = renderSchematic(document, settled);
+	const { svg, byteLength } = renderSchematicSized(document, settled);
 	const evidence = parsedSchematicEvidence(document);
 	return {
 		document,
@@ -120,7 +120,7 @@ export function compileSchematic(source: string, options: CompileSchematicOption
 			sourceCharacters: source.length,
 			components: document.components.length,
 			connections: document.connections.length,
-			svgBytes: utf8ByteLength(svg)
+			svgBytes: byteLength
 		},
 		sourceMap: schematicSourceMap(document),
 		placements: evidence.placements,

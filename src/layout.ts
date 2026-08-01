@@ -359,6 +359,25 @@ export function quantumGateDimensions(component: QuantumGateComponent): {
 	return { bodyWidth, bodyHeight, stubExtent: bodyWidth / 2 + 23 };
 }
 
+/*
+ * Membership sets for the four family predicates below.
+ *
+ * These were `KINDS.includes(component.kind)`. That is a linear scan with string
+ * equality at every step, and the *false* answer is the expensive one: an
+ * electrical component asks `isUmlComponent` and walks all forty-seven UML
+ * keywords before being told no. A 512-component profile put the four guards at
+ * roughly 5% of compile time, nearly all of it in that failing scan.
+ *
+ * A `Set` answers the same question by hash. It is built from the same frozen
+ * arrays, so membership cannot drift from the registries the parser validates
+ * against — there is no second list to keep in step — and it introduces no new
+ * string literals, which is what keeps this off the gzip budget.
+ */
+const CLASSICAL_GATE_KIND_SET: ReadonlySet<string> = new Set(CLASSICAL_GATE_KINDS);
+const DIGITAL_COMPONENT_KIND_SET: ReadonlySet<string> = new Set(DIGITAL_COMPONENT_KINDS);
+const QUANTUM_SPECIAL_KIND_SET: ReadonlySet<string> = new Set(QUANTUM_SPECIAL_KINDS);
+const UML_COMPONENT_KIND_SET: ReadonlySet<string> = new Set(UML_COMPONENT_KINDS);
+
 /**
  * Narrow any component to the classical-gate union.
  *
@@ -366,22 +385,22 @@ export function quantumGateDimensions(component: QuantumGateComponent): {
  * @returns Whether its kind belongs to the classical gate registry.
  */
 export function isClassicalGate(component: SchematicComponent): component is ClassicalGateComponent {
-	return CLASSICAL_GATE_KINDS.includes(component.kind as ClassicalGateComponent['kind']);
+	return CLASSICAL_GATE_KIND_SET.has(component.kind);
 }
 
 export function isDigitalComponent(component: SchematicComponent): component is DigitalComponent {
-	return DIGITAL_COMPONENT_KINDS.includes(component.kind as DigitalComponent['kind']);
+	return DIGITAL_COMPONENT_KIND_SET.has(component.kind);
 }
 
 export function isQuantumSpecial(
 	component: SchematicComponent
 ): component is QuantumSpecialComponent {
-	return QUANTUM_SPECIAL_KINDS.includes(component.kind as QuantumSpecialComponent['kind']);
+	return QUANTUM_SPECIAL_KIND_SET.has(component.kind);
 }
 
 /** Narrow a schematic component to a first-class UML node. */
 export function isUmlComponent(component: SchematicComponent): component is UmlComponent {
-	return UML_COMPONENT_KINDS.includes(component.kind as UmlComponent['kind']);
+	return UML_COMPONENT_KIND_SET.has(component.kind);
 }
 
 /** Return the exact canonical turn stored by any direction-sensitive component. */
@@ -1544,7 +1563,12 @@ function indexedSegmentCollision(
 	for (let column = minimum; column <= maximum; column += 1) {
 		const columnKey = column * BUCKET_COLUMN_STRIDE;
 		for (let row = lowestRow; row <= highestRow; row += 1) {
-			for (const entry of index.rectangleBuckets.get(columnKey + row) ?? []) {
+			/* An empty cell is the common answer on a sparse grid, and `?? []`
+			   paid for it with a fresh array and an iterator per miss. Skipping
+			   costs one comparison. */
+			const entries = index.rectangleBuckets.get(columnKey + row);
+			if (entries === undefined) continue;
+			for (const entry of entries) {
 				/* Stamp before testing: an obstacle spanning several cells was
 				   otherwise re-examined once per cell. */
 				if (entry.seen === query) continue;
@@ -1689,7 +1713,10 @@ function wireSegmentCost(
 	for (let column = minimum; column <= maximum; column += 1) {
 		const columnKey = column * BUCKET_COLUMN_STRIDE;
 		for (let row = lowestRow; row <= highestRow; row += 1) {
-			for (const previous of index.wireBuckets.get(columnKey + row) ?? []) {
+			/* Same empty-cell skip as `indexedSegmentCollision`. */
+			const occupants = index.wireBuckets.get(columnKey + row);
+			if (occupants === undefined) continue;
+			for (const previous of occupants) {
 				if (previous.seen === query) continue;
 				previous.seen = query;
 				if (Math.min(previous.start.y, previous.end.y) > highestY) continue;
@@ -1752,58 +1779,234 @@ function indexCompletedRoute(
 	if (label !== undefined) addRoutingRectangle(index, `wire-${routeIndex}`, 'label', label);
 }
 
-/** Deterministic minimum heap used by the bounded sparse Manhattan fallback. */
-class RouteHeap {
-	readonly #items: { state: number; cell: number; direction: number; g: number; f: number }[] = [];
+/* Shared empty columns: every arena starts unallocated and `begin` sizes it. */
+const EMPTY_F64 = new Float64Array(0);
+const EMPTY_I32 = new Int32Array(0);
+
+/** Directions a router state can arrive from: unset, horizontal, vertical. */
+const ROUTER_DIRECTIONS = 3;
+
+/** Sentinel for "no predecessor" in the arena's parent column. */
+const NO_STATE = -1;
+
+/**
+ * Allocation-free scratch for the bounded sparse Manhattan fallback.
+ *
+ * The retired implementation allocated a `{ state, cell, direction, g, f }`
+ * object per heap entry and kept `gScore`/`previous` in two `Map`s. On a dense
+ * document that is tens of thousands of short-lived objects and two hash lookups
+ * per neighbour, on the hottest loop in the compiler. Here the heap is three
+ * parallel typed arrays and the score columns are indexed directly by state.
+ *
+ * Two details carry the correctness of the whole structure:
+ *
+ * - **The comparison is byte-for-byte the retired `RouteHeap.before`.** Ordering
+ *   by `(f, g, state)` is what makes routing deterministic, and determinism is a
+ *   published property — a document must compile to one output across runs and
+ *   platforms. The tuple is unpacked into six arguments, and nothing else moved.
+ * - **`stamp` replaces clearing.** A state counts as visited only when its stamp
+ *   equals the current epoch, so starting a route costs one integer increment
+ *   rather than zeroing two grid-sized arrays. This is what makes the arena
+ *   reusable across the rip-up passes, which a twelve-wire bus needs seven of.
+ */
+export class RouterArena {
+	/** Best known cost to each state; meaningful only when stamped current. */
+	#g: Float64Array = EMPTY_F64;
+	/** Predecessor state, for path reconstruction. */
+	#previous: Int32Array = EMPTY_I32;
+	/** Epoch in which each state was last written. */
+	#stamp: Int32Array = EMPTY_I32;
+	/** Current epoch. Incremented once per route. */
+	#epoch = 0;
+	/** Heap columns, ordered by {@link RouterArena.before}. */
+	#heapState: Int32Array = EMPTY_I32;
+	#heapF: Float64Array = EMPTY_F64;
+	#heapG: Float64Array = EMPTY_F64;
+	/** Number of live heap entries. */
+	#size = 0;
+	/** State and cost most recently removed by {@link pop}. */
+	poppedState = NO_STATE;
+	poppedG = 0;
+
+	/**
+	 * Ready the arena for one route over a grid of `cells` cells.
+	 *
+	 * Score columns grow to fit and are never shrunk, so a document's largest
+	 * route sizes the arena for every route after it. The heap is left alone:
+	 * `push` grows it on demand, and sizing it here would only guess.
+	 *
+	 * @param cells - Number of lane-grid cells this route can reach.
+	 */
+	begin(cells: number): void {
+		const states = cells * ROUTER_DIRECTIONS;
+		if (states > this.#g.length) {
+			this.#g = new Float64Array(states);
+			this.#previous = new Int32Array(states);
+			/* A fresh stamp column is all zeroes, so the epoch must leave zero
+			   behind or every state in it would read as already visited. */
+			this.#stamp = new Int32Array(states);
+			this.#epoch = 0;
+		}
+		this.#epoch += 1;
+		this.#size = 0;
+	}
+
+	/**
+	 * Grow the heap columns to at least `required` entries, preserving contents.
+	 *
+	 * The heap is *not* bounded by the number of states. A state is pushed again
+	 * every time a cheaper route to it is found and the superseded entry stays in
+	 * place until it surfaces — the standard lazy-deletion trade, and the reason
+	 * `current()` exists. Sizing these columns to the state count would overflow
+	 * on exactly the congested documents the fallback is for.
+	 */
+	#reserveHeap(required: number): void {
+		if (required <= this.#heapState.length) return;
+		let capacity = Math.max(this.#heapState.length, 1);
+		while (capacity < required) capacity *= 2;
+		const states = new Int32Array(capacity);
+		const costs = new Float64Array(capacity);
+		const depths = new Float64Array(capacity);
+		states.set(this.#heapState);
+		costs.set(this.#heapF);
+		depths.set(this.#heapG);
+		this.#heapState = states;
+		this.#heapF = costs;
+		this.#heapG = depths;
+	}
 
 	get size(): number {
-		return this.#items.length;
+		return this.#size;
 	}
 
-	push(item: { state: number; cell: number; direction: number; g: number; f: number }): void {
-		this.#items.push(item);
-		let index = this.#items.length - 1;
+	/**
+	 * The retired `RouteHeap.before`, unpacked.
+	 *
+	 * Ordering by `(f, g, state)` — cost first, then depth, then a stable
+	 * tiebreak on identity — is the entire reason two runs of this router agree.
+	 */
+	static before(
+		leftF: number,
+		leftG: number,
+		leftState: number,
+		rightF: number,
+		rightG: number,
+		rightState: number
+	): boolean {
+		return leftF !== rightF ? leftF < rightF : leftG !== rightG ? leftG < rightG : leftState < rightState;
+	}
+
+	/** Insert one state, sifting up to preserve the heap order. */
+	push(state: number, g: number, f: number): void {
+		this.#reserveHeap(this.#size + 1);
+		const states = this.#heapState;
+		const costs = this.#heapF;
+		const depths = this.#heapG;
+		let index = this.#size;
+		this.#size += 1;
 		while (index > 0) {
 			const parent = (index - 1) >> 1;
-			if (!RouteHeap.before(item, this.#items[parent]!)) break;
-			this.#items[index] = this.#items[parent]!;
+			if (!RouterArena.before(f, g, state, costs[parent]!, depths[parent]!, states[parent]!)) break;
+			states[index] = states[parent]!;
+			costs[index] = costs[parent]!;
+			depths[index] = depths[parent]!;
 			index = parent;
 		}
-		this.#items[index] = item;
+		states[index] = state;
+		costs[index] = f;
+		depths[index] = g;
 	}
 
-	pop(): { state: number; cell: number; direction: number; g: number; f: number } | undefined {
-		const first = this.#items[0];
-		const last = this.#items.pop();
-		if (first === undefined || last === undefined || this.#items.length === 0) return first;
+	/**
+	 * Remove the cheapest state into {@link poppedState} and {@link poppedG}.
+	 *
+	 * Returning through fields rather than an object is the point: this runs
+	 * once per expansion, and an allocated result would reintroduce exactly the
+	 * garbage the arena exists to avoid.
+	 */
+	pop(): void {
+		const states = this.#heapState;
+		const costs = this.#heapF;
+		const depths = this.#heapG;
+		this.poppedState = states[0]!;
+		this.poppedG = depths[0]!;
+		this.#size -= 1;
+		const size = this.#size;
+		if (size === 0) return;
+		const lastState = states[size]!;
+		const lastF = costs[size]!;
+		const lastG = depths[size]!;
 		let index = 0;
 		while (true) {
 			const left = index * 2 + 1;
-			if (left >= this.#items.length) break;
+			if (left >= size) break;
 			const right = left + 1;
 			const child =
-				right < this.#items.length && RouteHeap.before(this.#items[right]!, this.#items[left]!)
+				right < size &&
+				RouterArena.before(costs[right]!, depths[right]!, states[right]!, costs[left]!, depths[left]!, states[left]!)
 					? right
 					: left;
-			if (!RouteHeap.before(this.#items[child]!, last)) break;
-			this.#items[index] = this.#items[child]!;
+			if (!RouterArena.before(costs[child]!, depths[child]!, states[child]!, lastF, lastG, lastState)) break;
+			states[index] = states[child]!;
+			costs[index] = costs[child]!;
+			depths[index] = depths[child]!;
 			index = child;
 		}
-		this.#items[index] = last;
-		return first;
+		states[index] = lastState;
+		costs[index] = lastF;
+		depths[index] = lastG;
 	}
 
-	static before(
-		left: { state: number; g: number; f: number },
-		right: { state: number; g: number; f: number }
-	): boolean {
-		return left.f !== right.f
-			? left.f < right.f
-			: left.g !== right.g
-				? left.g < right.g
-				: left.state < right.state;
+	/**
+	 * Whether a popped entry still describes the best route to its state.
+	 *
+	 * A state can be pushed several times as cheaper routes to it are found; the
+	 * stale copies must be discarded when they surface.
+	 */
+	current(state: number, g: number): boolean {
+		return this.#stamp[state] === this.#epoch && this.#g[state] === g;
+	}
+
+	/**
+	 * Whether reaching `state` at cost `g` improves on what is known.
+	 *
+	 * An unvisited state is treated as costing infinity rather than as an
+	 * automatic improvement, and the distinction is load-bearing: `wireSegmentCost`
+	 * returns `Infinity` for a contact the validator would reject, so an edge that
+	 * cannot legally be laid arrives here with `g === Infinity`. Comparing against
+	 * an infinite baseline refuses it — `Infinity < Infinity` is false — exactly as
+	 * the retired `g >= (gScore.get(state) ?? Number.POSITIVE_INFINITY)` did.
+	 * Treating "never seen" as improvable instead admits the illegal edge, and the
+	 * router then returns routes that overlap; only congested documents notice,
+	 * because only they price a contact that high.
+	 */
+	improves(state: number, g: number): boolean {
+		const known = this.#stamp[state] === this.#epoch ? this.#g[state]! : Number.POSITIVE_INFINITY;
+		return g < known;
+	}
+
+	/** Record a better route to `state`, arriving from `from`. */
+	relax(state: number, from: number, g: number): void {
+		this.#g[state] = g;
+		this.#previous[state] = from;
+		this.#stamp[state] = this.#epoch;
+	}
+
+	/** Predecessor of `state`, or {@link NO_STATE} at the start. */
+	predecessor(state: number): number {
+		return this.#previous[state]!;
 	}
 }
+
+/**
+ * One arena, reused for every route in the process.
+ *
+ * The router is synchronous and single-threaded, and a route never outlives the
+ * call that produced it, so a shared arena is safe and keeps a document's
+ * hundredth route as cheap as its first. It also survives rip-up: a retry pass
+ * reuses the columns the first pass sized.
+ */
+const routerArena = new RouterArena();
 
 /**
  * Ascending, de-duplicated candidate coordinates for one axis.
@@ -1881,67 +2084,73 @@ function searchOrthogonalRoute(
 	const startY = ys.indexOf(start.y);
 	const endX = xs.indexOf(end.x);
 	const endY = ys.indexOf(end.y);
+	const height = ys.length;
 	const startCell = startY * width + startX;
 	const endCell = endY * width + endX;
-	const stateId = (cell: number, direction: number) => cell * 3 + direction;
-	const gScore = new Map<number, number>();
-	const previous = new Map<number, number>();
-	const heap = new RouteHeap();
-	const startState = stateId(startCell, 0);
-	gScore.set(startState, 0);
-	heap.push({
-		state: startState,
-		cell: startCell,
-		direction: 0,
-		g: 0,
-		f: Math.abs(start.x - end.x) + Math.abs(start.y - end.y)
-	});
+	const arena = routerArena;
+	arena.begin(width * height);
+	const startState = startCell * ROUTER_DIRECTIONS;
+	arena.relax(startState, NO_STATE, 0);
+	arena.push(startState, 0, Math.abs(start.x - end.x) + Math.abs(start.y - end.y));
+	/*
+	 * Two scratch points, reused for every edge this search prices.
+	 *
+	 * `indexedSegmentCollision` and `wireSegmentCost` read coordinates and
+	 * retain nothing, so one pair serves the whole search instead of a pair per
+	 * neighbour — four allocations per expansion, on a loop that runs tens of
+	 * thousands of times. A callee that ever stored one of these would see it
+	 * mutate underneath; `the router prices an edge without allocating` in
+	 * tests/router-arena.test.ts is what holds that invariant.
+	 */
+	const from: SchematicPoint = { x: 0, y: 0 };
+	const to: SchematicPoint = { x: 0, y: 0 };
 	let expanded = 0;
 	let finalState: number | undefined;
-	while (heap.size > 0 && expanded < MAX_ROUTER_STATES) {
-		const current = heap.pop()!;
-		if (current.g !== gScore.get(current.state)) continue;
-		if (current.cell === endCell) {
-			finalState = current.state;
+	while (arena.size > 0 && expanded < MAX_ROUTER_STATES) {
+		arena.pop();
+		const currentState = arena.poppedState;
+		const currentG = arena.poppedG;
+		if (!arena.current(currentState, currentG)) continue;
+		const currentCell = Math.floor(currentState / ROUTER_DIRECTIONS);
+		if (currentCell === endCell) {
+			finalState = currentState;
 			break;
 		}
 		expanded += 1;
-		const xIndex = current.cell % width;
-		const yIndex = Math.floor(current.cell / width);
-		const from = { x: xs[xIndex]!, y: ys[yIndex]! };
-		const neighbors = [
-			[xIndex - 1, yIndex, 1],
-			[xIndex + 1, yIndex, 1],
-			[xIndex, yIndex - 1, 2],
-			[xIndex, yIndex + 1, 2]
-		] as const;
-		for (const [nextX, nextY, direction] of neighbors) {
-			if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= ys.length) continue;
-			const to = { x: xs[nextX]!, y: ys[nextY]! };
+		const currentDirection = currentState - currentCell * ROUTER_DIRECTIONS;
+		const xIndex = currentCell % width;
+		const yIndex = Math.floor(currentCell / width);
+		from.x = xs[xIndex]!;
+		from.y = ys[yIndex]!;
+		/*
+		 * The four orthogonal neighbours, unrolled. This was a fresh tuple array
+		 * of tuples per expansion; the arithmetic below yields the same order —
+		 * west, east, north, south — which the heap's `state` tiebreak makes
+		 * observable, so it is not free to change.
+		 */
+		for (let step = 0; step < 4; step += 1) {
+			const nextX = xIndex + (step === 0 ? -1 : step === 1 ? 1 : 0);
+			const nextY = yIndex + (step === 2 ? -1 : step === 3 ? 1 : 0);
+			if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= height) continue;
+			const direction = step < 2 ? 1 : 2;
+			to.x = xs[nextX]!;
+			to.y = ys[nextY]!;
 			if (indexedSegmentCollision(index, from, to, fromId, toId, 'route')) continue;
-			const cell = nextY * width + nextX;
-			const state = stateId(cell, direction);
-			const bend = current.direction !== 0 && current.direction !== direction;
+			const state = (nextY * width + nextX) * ROUTER_DIRECTIONS + direction;
+			const bend = currentDirection !== 0 && currentDirection !== direction;
 			const g =
-				current.g +
+				currentG +
 				Math.abs(from.x - to.x) +
 				Math.abs(from.y - to.y) +
 				(bend ? ROUTER_BEND_PENALTY : 0) +
 				wireSegmentCost(index, from, to, connection);
-			if (g >= (gScore.get(state) ?? Number.POSITIVE_INFINITY)) continue;
-			gScore.set(state, g);
-			previous.set(state, current.state);
-			heap.push({
-				state,
-				cell,
-				direction,
-				g,
-				f: g + Math.abs(to.x - end.x) + Math.abs(to.y - end.y)
-			});
+			if (!arena.improves(state, g)) continue;
+			arena.relax(state, currentState, g);
+			arena.push(state, g, g + Math.abs(to.x - end.x) + Math.abs(to.y - end.y));
 		}
 	}
 	/* v8 ignore next -- exercising the hard ceiling would make the unit suite allocate 40,000 states. */
-	if (finalState === undefined && heap.size > 0 && expanded >= MAX_ROUTER_STATES) {
+	if (finalState === undefined && arena.size > 0 && expanded >= MAX_ROUTER_STATES) {
 		throw new SchematicSyntaxError(
 			`Orthogonal routing complexity exceeds ${MAX_ROUTER_STATES.toLocaleString('en-US')} search states.`,
 			connection.line
@@ -1949,11 +2158,9 @@ function searchOrthogonalRoute(
 	}
 	if (finalState === undefined) return undefined;
 	const reversed: SchematicPoint[] = [];
-	let state: number | undefined = finalState;
-	while (state !== undefined) {
-		const cell = Math.floor(state / 3);
+	for (let state = finalState; state !== NO_STATE; state = arena.predecessor(state)) {
+		const cell = Math.floor(state / ROUTER_DIRECTIONS);
 		reversed.push({ x: xs[cell % width]!, y: ys[Math.floor(cell / width)]! });
-		state = previous.get(state);
 	}
 	return compactOrthogonalPoints(reversed.reverse());
 }
@@ -2688,6 +2895,16 @@ export interface SchematicRoutingReport {
 	}[];
 	/** Occupied cells only, ordered by column then row. */
 	readonly congestion: readonly SchematicCongestionCell[];
+	/**
+	 * Whether the bundle was laid out together after reordering was exhausted.
+	 *
+	 * False for every document that routes greedily, which is every document that
+	 * compiled before 0.7. True means rip-up spent its whole budget and the traces
+	 * were then assigned channels as a set — the path that routes a reversal bus
+	 * wider than twelve. A host showing routing diagnostics can treat it as "this
+	 * diagram is congested enough that declaration order stopped mattering".
+	 */
+	readonly nudged: boolean;
 }
 
 /**
@@ -2734,6 +2951,179 @@ function connectionSpan(
 }
 
 /**
+ * Lay one bundle of contending traces out together instead of one at a time.
+ *
+ * ## Why this exists
+ *
+ * Greedy routing decides each trace on its own merits, and on a bus that is the
+ * whole problem: the first wire takes the short central channel because nothing
+ * stops it, and every wire after it inherits a worse canvas. Rip-up reorders who
+ * chooses first, but somebody still chooses first, so reordering cannot reach a
+ * layout in which *no* wire takes the middle. 0.5.0 searched twenty thousand
+ * orders at thirteen wires and concluded the channel model was full.
+ *
+ * It is not full. A twelve-unit pitch across this channel admits legal routings
+ * for at least thirty-two wires; what it does not admit is *greedy* ones. The
+ * assignment has to be made for the bundle at once, which is what this does.
+ *
+ * ## The shape
+ *
+ * Every trace takes the same five-segment dogleg, and the bundle differs only in
+ * where each one turns:
+ *
+ * ```text
+ *   start ── A_k ┐                          rank k gets column A_k on the way out,
+ *                └──── mid_k ────┐          row mid_k across the middle, and
+ *                                └─ B_k ──  end   column B_k on the way in
+ * ```
+ *
+ * `A_k` steps inward from the source side by rank and `B_k` inward from the
+ * target side, so two traces never turn on the same column; `mid_k` spreads the
+ * middle runs across the band the bundle shares. A wire that would double back
+ * to reach its row is refused rather than drawn, which is what keeps the shape
+ * honest on bundles that are not buses.
+ *
+ * ## What it does not do
+ *
+ * This is a rescue, not a replacement. It runs only after rip-up has exhausted
+ * its budget, so every document that compiles today reaches the same routes
+ * through the same code and is byte-identical. It requires a bundle that is
+ * entirely orthogonal — a `line` or `bezier` in the set leaves the shape
+ * meaningless — and it verifies every trace it produces against the same
+ * obstacle and contact predicates the greedy router uses. If any check fails the
+ * bundle is abandoned and the caller's original diagnostic stands.
+ *
+ * @param connections - Every connection in the document, in source order.
+ * @param components - Complete component map.
+ * @returns Routes in source order and the index that accepted them, or
+ *   `undefined` when the bundle does not admit this shape.
+ */
+function routeNudgedBundle(
+	connections: readonly SchematicConnection[],
+	components: ReadonlyMap<string, SchematicComponent>
+): { readonly routes: RoutedConnection[]; readonly index: RoutingIndex } | undefined {
+	/* No guard on bundle size: the caller reaches this only when a trace failed
+	   with at least one placed before it, so a bundle is never shorter than two. */
+	if (connections.some((connection) => connection.curve !== 'ortho')) return undefined;
+
+	/* Escape points are where the shape actually begins; the terminal stub in
+	   front of them is reserved for every trace before any is placed. */
+	const escapes = connections.map((connection) => {
+		const from = endpointGeometry(connection.from, components);
+		const to = endpointGeometry(connection.to, components);
+		return {
+			from,
+			to,
+			start: escapePoint(from, componentObstacleRectangle(from.component)),
+			end: escapePoint(to, componentObstacleRectangle(to.component))
+		};
+	});
+
+	/*
+	 * Rank is the whole algorithm, so it is a pure function of geometry: traces are
+	 * ordered by the row they leave from, and two documents that declare the same
+	 * bus in different orders receive the same layout.
+	 *
+	 * One comparison, not three. Ties fall back to declaration order because the
+	 * list starts in declaration order and `sort` has been required to be stable
+	 * since ES2019 — an explicit `|| left - right` would be dead code that reads
+	 * like a safeguard, which is worse than none.
+	 */
+	const ranking = connections
+		.map((_, index) => index)
+		.sort((left, right) => escapes[left]!.start.y - escapes[right]!.start.y);
+	/* The row the bundle crosses together. Individual midpoints are spread around
+	   this rather than around each trace's own centre, so a bundle whose spans
+	   differ still lands on one set of distinct middle rows. */
+	let bandTotal = 0;
+	for (const escape of escapes) bandTotal += (escape.start.y + escape.end.y) / 2;
+	const band = bandTotal / escapes.length;
+	const count = connections.length;
+
+	const index = createRoutingIndex(components, connections);
+	const routes: RoutedConnection[] = new Array(count);
+	for (const [rank, original] of ranking.entries()) {
+		const connection = connections[original]!;
+		const { from, to, start, end } = escapes[original]!;
+		const inset = ROUTER_CHANNEL_PITCH * (rank + 1);
+		const middle: SchematicPoint[] = [];
+		if (start.y === end.y) {
+			/* Already level: a straight run needs no dogleg, and inventing one
+			   would cross every trace that legitimately owns a middle row. */
+			middle.push(start, end);
+		} else {
+			const towards = end.x >= start.x ? 1 : -1;
+			const columnA = start.x + towards * inset;
+			const columnB = end.x - towards * inset;
+			const midRow = band + (rank - (count - 1) / 2) * ROUTER_CHANNEL_PITCH;
+			const lowRow = Math.min(start.y, end.y);
+			const highRow = Math.max(start.y, end.y);
+			/* Refuse rather than double back. A middle row outside the trace's own
+			   span produces a legal but absurd path, and on a bundle that is not a
+			   bus it is the common case — so it is the signal to abandon. */
+			if (midRow <= lowRow || midRow >= highRow) return undefined;
+			if ((columnB - columnA) * towards <= 0) return undefined;
+			middle.push(
+				start,
+				{ x: columnA, y: start.y },
+				{ x: columnA, y: midRow },
+				{ x: columnB, y: midRow },
+				{ x: columnB, y: end.y },
+				end
+			);
+		}
+		/*
+		 * No bounds check. Every point this emits lies inside the bounding box of
+		 * the two escape points — columns are inset from each end and the crossing
+		 * guard above keeps them from passing each other, and the middle row is
+		 * required to sit between the two terminal rows. Both escapes hang off
+		 * bodies the parser already validated against the fence, so a point outside
+		 * it is unreachable, and a guard for it would be untestable scaffolding.
+		 */
+		const points = compactOrthogonalPoints([from.point, ...middle, to.point]);
+		/* Verified with the router's own predicates rather than a second opinion:
+		   nothing may clip a body, and every contact must be one the validator
+		   will accept when it sees the same geometry a moment from now. */
+		if (routeIntersectsObstacles(points, index, from.component.id, to.component.id)) {
+			return undefined;
+		}
+		/*
+		 * A postcondition, kept because it is cheap and the alternative is silence.
+		 * The construction gives every trace its own outbound column, its own
+		 * inbound column and its own middle row, so two members of a bundle can
+		 * only ever meet at a strict perpendicular crossing — the contact the
+		 * validator permits. Nothing reaches this branch today, and if a future
+		 * change to the shape makes it reachable, abandoning the bundle is what
+		 * keeps illegal copper out of the drawing rather than into it.
+		 */
+		/* v8 ignore next 3 -- postcondition; distinct columns and rows exclude it. */
+		if (routeOccupancyCost(points, index, connection) === Number.POSITIVE_INFINITY) {
+			return undefined;
+		}
+		/*
+		 * A marker that will not fit is reported, not swallowed. The bundle has
+		 * already been proved legal by this point, so the document does route — and
+		 * answering "no orthogonal route exists" because an arrowhead is too large
+		 * would send the author looking for a contention problem they do not have.
+		 */
+		const route = validateMarkerCollisions(
+			connection,
+			{
+				curve: 'ortho',
+				d: orthogonalPath(points),
+				points: points as [SchematicPoint, SchematicPoint, ...SchematicPoint[]]
+			},
+			index,
+			from.component.id,
+			to.component.id
+		);
+		routes[original] = route;
+		indexCompletedRoute(index, route, connection, original);
+	}
+	return { routes, index };
+}
+
+/**
  * Route every trace, tearing up earlier ones when a later one has nowhere to go.
  *
  * The greedy source-order pass this wraps is unchanged and is still what runs for
@@ -2777,6 +3167,7 @@ function routeWithRipUp(
 	readonly index: RoutingIndex;
 	readonly attempts: number;
 	readonly rippedUp: readonly { readonly connectionIndex: number; readonly attempt: number }[];
+	readonly nudged?: boolean;
 } {
 	/** Traces promoted by an earlier failure, highest priority first. */
 	const promoted: number[] = [];
@@ -2831,12 +3222,34 @@ function routeWithRipUp(
 			}
 		}
 		if (failedAt === -1) {
-			return { routes, index, attempts: pass - 1, rippedUp };
+			return { routes, index, attempts: pass - 1, rippedUp, nudged: false };
 		}
 		/* A trace that fails with nothing placed before it fails on its own terms —
 		   its endpoints are unreachable, not contended — so there is nothing to tear
 		   up and the diagnostic it already raised is the right one. */
-		if (pass >= routingAttempts || failedAt === 0) throw failure;
+		if (failedAt === 0) throw failure;
+		if (pass >= routingAttempts) {
+			/*
+			 * Reordering is spent. Contention that survives every order is the
+			 * signature of a bundle that no greedy pass can lay out, so the last
+			 * thing tried is laying the whole bundle out at once.
+			 *
+			 * Not when the host allowed no retries at all. `routingAttempts: 1` is
+			 * documented as restoring pre-0.5 routing exactly, and a budget of one
+			 * has nothing to exhaust — reaching a second strategy through it would
+			 * make that promise false.
+			 */
+			const nudged =
+				routingAttempts > 1 ? routeNudgedBundle(connections, components) : undefined;
+			if (nudged === undefined) throw failure;
+			return {
+				routes: nudged.routes,
+				index: nudged.index,
+				attempts: pass,
+				rippedUp,
+				nudged: true
+			};
+		}
 		for (const connectionIndex of order.slice(0, failedAt)) {
 			rippedUp.push({ connectionIndex, attempt: pass });
 		}
@@ -3038,7 +3451,8 @@ export function routeSchematicConnections(
 		report: {
 			attempts: attempt.attempts,
 			rippedUp: attempt.rippedUp,
-			congestion: congestionMap(spatialIndex)
+			congestion: congestionMap(spatialIndex),
+			nudged: attempt.nudged === true
 		}
 	};
 }
@@ -3484,7 +3898,8 @@ export function validateSchematicGeometry(
 export const EMPTY_ROUTING_REPORT: SchematicRoutingReport = Object.freeze({
 	attempts: 0,
 	rippedUp: Object.freeze([]),
-	congestion: Object.freeze([])
+	congestion: Object.freeze([]),
+	nudged: false
 });
 
 /**

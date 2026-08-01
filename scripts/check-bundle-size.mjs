@@ -29,7 +29,21 @@ const BUDGETS = [
 		 * router is already here, and the report is what it now records while working.
 		 * Recorded rather than absorbed, and paid for by features rather than drift.
 		 */
-		maxGzipBytes: 34 * 1024
+		/*
+		 * 35 KiB from 34 in 0.7, for bundle nudging. Like relative placement before
+		 * it this cannot tree-shake out of the compile path — it is reached from
+		 * `routeWithRipUp`, so every document that routes carries it — and it buys
+		 * a reversal bus of thirty-two wires where twelve was previously recorded
+		 * as a hard limit of the channel model. Roughly 380 B, measured, and paid
+		 * for by a capability rather than by drift.
+		 *
+		 * Four separate attempts to buy it back are recorded in `O5Idea.md` §13:
+		 * packed encodings, glyph tables and literal hoisting each made the gzipped
+		 * bundle *larger* despite shrinking the minified one. This bundle sits at a
+		 * gzip-efficiency floor, so the honest move is to record the cost here
+		 * rather than to chase it.
+		 */
+		maxGzipBytes: 35 * 1024
 	},
 	{
 		label: 'Package bundle (every public export)',
