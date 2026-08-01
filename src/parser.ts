@@ -261,7 +261,25 @@ function parseAlpha(value: string): boolean {
  * @param body - Text between the outer `rgb()` or `rgba()` parentheses.
  * @returns Canonical modern `rgb()` syntax, or `undefined` for invalid channels.
  */
-function parseRgb(body: string): string | undefined {
+/**
+ * Normalize legacy comma or modern space-separated CSS colour function contents.
+ *
+ * `rgb()` and `hsl()` accept exactly the same shapes — legacy comma syntax with a
+ * fourth alpha channel, modern space syntax with a `/ alpha` suffix — and differ
+ * only in what the three channels are then required to be. That splitting was
+ * written out twice, identically, so a fix to one spelling could miss the other.
+ * The difference is passed in rather than duplicated around it.
+ *
+ * @param name - Canonical function name to emit.
+ * @param body - Text between the function's outer parentheses.
+ * @param channelsValid - Family-specific validation of exactly three channels.
+ * @returns Canonical modern syntax, or `undefined` for invalid channels.
+ */
+function parseFunctionalColor(
+	name: string,
+	body: string,
+	channelsValid: (channels: readonly string[]) => boolean
+): string | undefined {
 	const commaSyntax = body.includes(',');
 	const slashParts = body.split('/').map((part) => part.trim());
 	if (slashParts.length > 2 || (commaSyntax && slashParts.length > 1)) return undefined;
@@ -269,50 +287,35 @@ function parseRgb(body: string): string | undefined {
 		? slashParts[0]!.split(',').map((part) => part.trim())
 		: slashParts[0]!.split(/\s+/);
 	const legacyAlpha = commaSyntax && parsedChannels.length === 4 ? parsedChannels[3] : undefined;
-	const rawChannels = legacyAlpha === undefined ? parsedChannels : parsedChannels.slice(0, 3);
+	const channels = legacyAlpha === undefined ? parsedChannels : parsedChannels.slice(0, 3);
 	const alpha: string | undefined = slashParts.at(1) ?? legacyAlpha;
 	if (
-		rawChannels.length !== 3 ||
-		!rawChannels.every((channel) => parseRangedNumber(channel, 0, 255, true)) ||
+		channels.length !== 3 ||
+		!channelsValid(channels) ||
 		(alpha !== undefined && !parseAlpha(alpha))
 	) {
 		return undefined;
 	}
-	return `rgb(${rawChannels.join(' ')}${alpha === undefined ? '' : ` / ${alpha}`})`;
+	return `${name}(${channels.join(' ')}${alpha === undefined ? '' : ` / ${alpha}`})`;
 }
 
-/**
- * Normalize legacy comma or modern space-separated HSL function contents.
- *
- * @param body - Text between the outer `hsl()` or `hsla()` parentheses.
- * @returns Canonical modern `hsl()` syntax, or `undefined` for invalid channels.
- */
+function parseRgb(body: string): string | undefined {
+	return parseFunctionalColor('rgb', body, (channels) =>
+		channels.every((channel) => parseRangedNumber(channel, 0, 255, true))
+	);
+}
+
 function parseHsl(body: string): string | undefined {
-	const commaSyntax = body.includes(',');
-	const slashParts = body.split('/').map((part) => part.trim());
-	if (slashParts.length > 2 || (commaSyntax && slashParts.length > 1)) return undefined;
-	const parsedChannels = commaSyntax
-		? slashParts[0]!.split(',').map((part) => part.trim())
-		: slashParts[0]!.split(/\s+/);
-	const legacyAlpha = commaSyntax && parsedChannels.length === 4 ? parsedChannels[3] : undefined;
-	const rawChannels = legacyAlpha === undefined ? parsedChannels : parsedChannels.slice(0, 3);
-	const alpha: string | undefined = slashParts.at(1) ?? legacyAlpha;
-	const [hue, saturation, lightness] = rawChannels;
-	if (
-		rawChannels.length !== 3 ||
-		hue === undefined ||
-		!ANGLE_PATTERN.test(hue) ||
-		saturation === undefined ||
-		!saturation.endsWith('%') ||
-		!parseRangedNumber(saturation, 0, 100, true) ||
-		lightness === undefined ||
-		!lightness.endsWith('%') ||
-		!parseRangedNumber(lightness, 0, 100, true) ||
-		(alpha !== undefined && !parseAlpha(alpha))
-	) {
-		return undefined;
-	}
-	return `hsl(${rawChannels.join(' ')}${alpha === undefined ? '' : ` / ${alpha}`})`;
+	return parseFunctionalColor(
+		'hsl',
+		body,
+		([hue, saturation, lightness]) =>
+			ANGLE_PATTERN.test(hue!) &&
+			saturation!.endsWith('%') &&
+			parseRangedNumber(saturation!, 0, 100, true) &&
+			lightness!.endsWith('%') &&
+			parseRangedNumber(lightness!, 0, 100, true)
+	);
 }
 
 /**

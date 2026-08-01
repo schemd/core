@@ -1752,6 +1752,10 @@ function indexCompletedRoute(
 	if (label !== undefined) addRoutingRectangle(index, `wire-${routeIndex}`, 'label', label);
 }
 
+/* Shared empty columns: every arena starts unallocated and `begin` sizes it. */
+const EMPTY_F64 = new Float64Array(0);
+const EMPTY_I32 = new Int32Array(0);
+
 /** Directions a router state can arrive from: unset, horizontal, vertical. */
 const ROUTER_DIRECTIONS = 3;
 
@@ -1780,37 +1784,29 @@ const NO_STATE = -1;
  */
 export class RouterArena {
 	/** Best known cost to each state; meaningful only when stamped current. */
-	#g: Float64Array;
+	#g: Float64Array = EMPTY_F64;
 	/** Predecessor state, for path reconstruction. */
-	#previous: Int32Array;
+	#previous: Int32Array = EMPTY_I32;
 	/** Epoch in which each state was last written. */
-	#stamp: Int32Array;
+	#stamp: Int32Array = EMPTY_I32;
 	/** Current epoch. Incremented once per route. */
 	#epoch = 0;
 	/** Heap columns, ordered by {@link RouterArena.before}. */
-	#heapState: Int32Array;
-	#heapF: Float64Array;
-	#heapG: Float64Array;
+	#heapState: Int32Array = EMPTY_I32;
+	#heapF: Float64Array = EMPTY_F64;
+	#heapG: Float64Array = EMPTY_F64;
 	/** Number of live heap entries. */
 	#size = 0;
 	/** State and cost most recently removed by {@link pop}. */
 	poppedState = NO_STATE;
 	poppedG = 0;
 
-	constructor() {
-		this.#g = new Float64Array(0);
-		this.#previous = new Int32Array(0);
-		this.#stamp = new Int32Array(0);
-		this.#heapState = new Int32Array(0);
-		this.#heapF = new Float64Array(0);
-		this.#heapG = new Float64Array(0);
-	}
-
 	/**
 	 * Ready the arena for one route over a grid of `cells` cells.
 	 *
-	 * Columns grow to fit and are never shrunk, so a document's largest route
-	 * sizes the arena for every route after it.
+	 * Score columns grow to fit and are never shrunk, so a document's largest
+	 * route sizes the arena for every route after it. The heap is left alone:
+	 * `push` grows it on demand, and sizing it here would only guess.
 	 *
 	 * @param cells - Number of lane-grid cells this route can reach.
 	 */
@@ -1824,7 +1820,6 @@ export class RouterArena {
 			this.#stamp = new Int32Array(states);
 			this.#epoch = 0;
 		}
-		this.#reserveHeap(states);
 		this.#epoch += 1;
 		this.#size = 0;
 	}
@@ -1970,12 +1965,6 @@ export class RouterArena {
 		this.#stamp[state] = this.#epoch;
 	}
 
-	/** Seed the start state, which has no predecessor. */
-	seed(state: number, f: number): void {
-		this.relax(state, NO_STATE, 0);
-		this.push(state, 0, f);
-	}
-
 	/** Predecessor of `state`, or {@link NO_STATE} at the start. */
 	predecessor(state: number): number {
 		return this.#previous[state]!;
@@ -2074,7 +2063,8 @@ function searchOrthogonalRoute(
 	const arena = routerArena;
 	arena.begin(width * height);
 	const startState = startCell * ROUTER_DIRECTIONS;
-	arena.seed(startState, Math.abs(start.x - end.x) + Math.abs(start.y - end.y));
+	arena.relax(startState, NO_STATE, 0);
+	arena.push(startState, 0, Math.abs(start.x - end.x) + Math.abs(start.y - end.y));
 	/*
 	 * Two scratch points, reused for every edge this search prices.
 	 *
