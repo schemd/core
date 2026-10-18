@@ -2,7 +2,7 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
-## [1.0.2] - 2026-10-17
+## [1.0.2] - 2026-10-18
 
 ### Fixed
 
@@ -20,7 +20,7 @@ No changes from 1.0.0. This version was tagged before the fixes meant for it wer
 
 ## [1.0.0] - 2026-10-17
 
-1.0 is a rebuild of the compiler's core behind the same language and the same API. The language is read exactly as before — the 0.8 declaration patterns are the front end — and of the corpus's 54 rejections under 0.8, 52 are byte-identical in 1.0. Drawings change, because the router is new, and three corpus documents change outcome; each is listed under *Changed*.
+1.0 is a rebuild of the compiler's core behind the same language and the same API. The language is read exactly as before — the 0.8 declaration patterns are the front end — and of the corpus's 54 rejections under 0.8, 52 are byte-identical in 1.0. Drawings change, because the router is new, and three corpus documents change outcome; each is listed under _Changed_.
 
 ### Changed
 
@@ -119,9 +119,9 @@ No changes from 1.0.0. This version was tagged before the fixes meant for it wer
 - The budget stayed exact and stayed atomic, which is why it was worth doing this way rather than estimating. A chunk that does not fit entirely is detected rather than truncated, and the cursor advances only after the check passes — so a rejected append commits nothing, the property 0.3.2 fixed, now structural instead of maintained by ordering.
 - **A rejected append can no longer be rejected wrongly.** The retired counter assumed any high surrogate began a valid pair and charged four bytes; an unpaired one encodes to three, so a document that fits could be refused. The writer now charges what it actually writes.
 - `compileSchematic` no longer rescans the finished document to report `metrics.svgBytes`. The writer already counted it.
-- **The orthogonal router's fallback search allocates nothing.** The bounded sparse A* kept a heap of object literals and two `Map`s — tens of thousands of short-lived objects and two hash lookups per neighbour, on the hottest loop in the compiler. It is now three parallel typed arrays with the score columns indexed by state, the four-neighbour expansion unrolled, and one pair of scratch points for the whole search. A twelve-wire contended bus compiles in 29.3 ms, from 33.9 ms.
+- **The orthogonal router's fallback search allocates nothing.** The bounded sparse A\* kept a heap of object literals and two `Map`s — tens of thousands of short-lived objects and two hash lookups per neighbour, on the hottest loop in the compiler. It is now three parallel typed arrays with the score columns indexed by state, the four-neighbour expansion unrolled, and one pair of scratch points for the whole search. A twelve-wire contended bus compiles in 29.3 ms, from 33.9 ms.
 - The arena is reused across routes **and across rip-up passes**, which is where it matters: a twelve-wire bus takes seven passes, and each one used to rebuild its heap and maps. A generation stamp replaces clearing, so starting a route costs one integer increment.
-- **The family predicates answer by hash rather than by scan.** `isClassicalGate`, `isDigitalComponent`, `isQuantumSpecial` and `isUmlComponent` each ran `KINDS.includes(component.kind)`, and the *false* answer is the expensive one: an electrical component walked all forty-seven UML keywords before being told no. A 512-component profile put the four predicates at roughly 5% of compile time, nearly all of it in that failing scan. Each now tests a set **derived from the same frozen registry it classifies**, so membership cannot drift from the keywords the parser accepts — there is no second list to keep in step. A 512-component figure compiles in 2.69 ms, from 3.19 ms.
+- **The family predicates answer by hash rather than by scan.** `isClassicalGate`, `isDigitalComponent`, `isQuantumSpecial` and `isUmlComponent` each ran `KINDS.includes(component.kind)`, and the _false_ answer is the expensive one: an electrical component walked all forty-seven UML keywords before being told no. A 512-component profile put the four predicates at roughly 5% of compile time, nearly all of it in that failing scan. Each now tests a set **derived from the same frozen registry it classifies**, so membership cannot drift from the keywords the parser accepts — there is no second list to keep in step. A 512-component figure compiles in 2.69 ms, from 3.19 ms.
 - **A bucket query no longer allocates when the cell is empty.** `indexedSegmentCollision` and `wireSegmentCost` read their spatial buckets as `get(cell) ?? []`, so every miss — the common answer on a sparse grid — bought a fresh array and an iterator in order to iterate nothing, in the innermost of three nested loops. Both skip the cell instead. A twelve-wire contended bus compiles in 25.2 ms, from 27.2 ms, and dense 16×16 routing in 4.18 ms, from 4.87 ms.
 - Both of the above are byte-identical across all 261 corpus documents and cost 22 B gzip together. The predicate change adds **no new string literals** — the sets are built from the arrays already in the bundle — which is why a measurable speedup was available here at a price Part 4's techniques could not reach.
 
