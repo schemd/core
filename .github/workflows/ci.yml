@@ -43,7 +43,9 @@ jobs:
     if: ${{ always() }}
     name: Verify
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A cold Chromium/system-dependency install can take eight minutes alone.
+    # Leave time for coverage, mutations, visual goldens, and release packaging.
+    timeout-minutes: 20
     steps:
       - name: Require every package consumer to pass
         if: needs.consumer.result != 'success'
