@@ -21,19 +21,13 @@ export function cacheParsedSchematicRoutes(
 	parsedDocumentRoutes.set(document, { key: canvasKey(bounds), routes, sheet });
 }
 
-/** Reuse routes only when render bounds match the parser's geometry contract. */
-export function parsedSchematicRoutes(
+/** Reuse routes, and the sheet they were validated on, only when the canvas matches the parser's. */
+export function parsedSchematicGeometry(
 	document: SchematicDocument,
 	bounds: SchematicBounds | 'auto'
-): readonly RoutedConnection[] | undefined {
+): { readonly routes: readonly RoutedConnection[]; readonly sheet: SchematicSheet } | undefined {
 	const cached = parsedDocumentRoutes.get(document);
-	return cached?.key === canvasKey(bounds) ? cached.routes : undefined;
-}
-
-/** The sheet the parser measured or was given, when the canvas matches. */
-export function parsedSchematicSheet(document: SchematicDocument, bounds: SchematicBounds | 'auto'): SchematicSheet | undefined {
-	const cached = parsedDocumentRoutes.get(document);
-	return cached?.key === canvasKey(bounds) ? cached.sheet : undefined;
+	return cached?.key === canvasKey(bounds) ? cached : undefined;
 }
 
 /**

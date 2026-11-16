@@ -1145,14 +1145,12 @@ function measureSheet(document: SchematicDocument, routes: readonly RoutedConnec
 	let width = Math.ceil((maxX + margin) / 1000) - x;
 	let height = Math.ceil((maxY + margin) / 1000) - y;
 	/* A sheet narrower than the smallest declarable canvas is widened about its centre. */
-	if (width < MIN_SCHEMATIC_BOUND) {
-		x -= Math.floor((MIN_SCHEMATIC_BOUND - width) / 2);
-		width = MIN_SCHEMATIC_BOUND;
-	}
-	if (height < MIN_SCHEMATIC_BOUND) {
-		y -= Math.floor((MIN_SCHEMATIC_BOUND - height) / 2);
-		height = MIN_SCHEMATIC_BOUND;
-	}
+	const wider = Math.max(0, MIN_SCHEMATIC_BOUND - width);
+	const taller = Math.max(0, MIN_SCHEMATIC_BOUND - height);
+	x -= Math.floor(wider / 2);
+	y -= Math.floor(taller / 2);
+	width += wider;
+	height += taller;
 	if (width > MAX_SCHEMATIC_BOUND || height > MAX_SCHEMATIC_BOUND) {
 		throw new SchematicSyntaxError(
 			`The drawing spans ${width}x${height}, which is more than the ${MAX_SCHEMATIC_BOUND.toLocaleString('en-US')} units a sheet may measure on a side; move the parts closer together.`,

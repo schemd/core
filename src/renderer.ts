@@ -29,7 +29,7 @@ import {
 	type SchematicResolvedLimits
 } from './limits.js';
 import { assertParsedSchematicDocument } from './parser.js';
-import { parsedSchematicRoutes, parsedSchematicSheet } from './route-cache.js';
+import { parsedSchematicGeometry } from './route-cache.js';
 import { colorAttributes, TEXT_PAINT } from './symbols/common.js';
 import { definition, placedPorts, turnOf } from './symbols/index.js';
 import {
@@ -733,22 +733,20 @@ export function renderSchematicSized(
 	 * component map materialized) only for uncached bounds.
 	 */
 	const canvas = normalized.bounds;
-	const cached = parsedSchematicRoutes(document, canvas);
 	const geometry =
-		cached === undefined
-			? validateSchematicGeometry(
-					document,
-					normalized,
-					canvas === 'auto'
-						? undefined
-						: routeConnections(
-								document.connections,
-								new Map(document.components.map((component) => [component.id, component])),
-								canvas,
-								normalized.limits.wireCrossings
-							)
-				)
-			: { routes: cached, sheet: parsedSchematicSheet(document, canvas)! };
+		parsedSchematicGeometry(document, canvas) ??
+		validateSchematicGeometry(
+			document,
+			normalized,
+			canvas === 'auto'
+				? undefined
+				: routeConnections(
+						document.connections,
+						new Map(document.components.map((component) => [component.id, component])),
+						canvas,
+						normalized.limits.wireCrossings
+					)
+		);
 	const routedConnections = geometry.routes;
 	const sheet = geometry.sheet;
 	/* A declared canvas starts at the origin, and is written exactly as it always was. */

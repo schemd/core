@@ -737,9 +737,100 @@ const mutants = [
 	{
 		name: "connections are still checked after a placement fails",
 		file: "src/parser.ts",
-		from: "\t\t   terminal's name depends on its part's kind, never on where it sits. */\n\t\tfor (const entry of pending) {",
-		to: "\t\t   terminal's name depends on its part's kind, never on where it sits. */\n\t\tif (reporter.failed) return undefined;\n\t\tfor (const entry of pending) {",
+		from: "\t\tplacements = resolvePlacements(components, settled, limits.placementDepth, (error) => reporter.report(error), poisoned);\n\t\tcheckPlaced(settled);",
+		to: "\t\tplacements = resolvePlacements(components, settled, limits.placementDepth, (error) => reporter.report(error), poisoned);\n\t\tif (reporter.failed) return undefined;\n\t\tcheckPlaced(settled);",
 		tests: ["tests/diagnose.test.ts"]
+	},
+	{
+		name: "a measured sheet keeps its margin around the drawing",
+		file: "src/layout.ts",
+		from: "\tconst margin = SCHEMATIC_SHEET_MARGIN * 1000;",
+		to: "\tconst margin = 0;",
+		tests: ["tests/auto-canvas.test.ts"]
+	},
+	{
+		name: "a measured sheet holds its wire labels",
+		file: "src/layout.ts",
+		from: "\t\tif (label !== undefined) note(label.minX, label.minY, label.maxX, label.maxY);",
+		to: "\t\tvoid label;",
+		tests: ["tests/auto-canvas.test.ts"]
+	},
+	{
+		name: "a measured sheet has no edge for an origin to be outside of",
+		file: "src/parser.ts",
+		from: "\tif (fence.bounds === 'auto') return undefined;",
+		to: "\tif (fence.bounds === 'auto') fence = { ...fence, bounds: { width: 64, height: 64 } };",
+		tests: ["tests/auto-canvas.test.ts"]
+	},
+	{
+		name: "the surface starts where a measured sheet starts",
+		file: "src/renderer.ts",
+		from: "\tconst origin = sheet.x === 0 && sheet.y === 0 ? '' : ` x=\"${sheet.x}\" y=\"${sheet.y}\"`;",
+		to: "\tconst origin = '';",
+		tests: ["tests/auto-canvas.test.ts"]
+	},
+	{
+		name: "a declaration with no position is a head and then a colour or an option block",
+		file: "src/syntax.ts",
+		from: "clause.relations.length === 0 && UNPLACED_TAIL.test(head[4]!) && !PLACEMENT_WORD.test(head[4]!)",
+		to: "clause.relations.length === 0 && !PLACEMENT_WORD.test(head[4]!)",
+		tests: ["tests/draft.test.ts", "tests/placement.test.ts"]
+	},
+	{
+		name: "a placement word alone is not a colour",
+		file: "src/syntax.ts",
+		from: "clause.relations.length === 0 && UNPLACED_TAIL.test(head[4]!) && !PLACEMENT_WORD.test(head[4]!)",
+		to: "clause.relations.length === 0 && UNPLACED_TAIL.test(head[4]!)",
+		tests: ["tests/draft.test.ts"]
+	},
+	{
+		name: "the draft follows a wire the way it was written before it follows one backwards",
+		file: "src/draft.ts",
+		from: "if (wire.forward && open(wire)) commit(",
+		to: "if (open(wire)) commit(",
+		tests: ["tests/draft.test.ts"]
+	},
+	{
+		name: "a pin at its part's centre has no side",
+		file: "src/draft.ts",
+		from: "pin.point.x === toMilli(part.x) && pin.point.y === toMilli(part.y);",
+		to: "false;",
+		tests: ["tests/draft.test.ts"]
+	},
+	{
+		name: "a drafted part keeps clear of every part already down",
+		file: "src/draft.ts",
+		from: "const clearance = DRAFT_CLEARANCE * 1000;",
+		to: "const clearance = 0;",
+		tests: ["tests/draft.test.ts"]
+	},
+	{
+		name: "a part too close to its own neighbour moves out, not aside",
+		file: "src/draft.ts",
+		from: "if (blocking.length !== 1 || blocking[0] !== anchor) break;",
+		to: "if (blocking.length !== 0) break;",
+		tests: ["tests/draft.test.ts"]
+	},
+	{
+		name: "an author's position is never drafted over",
+		file: "src/draft.ts",
+		from: "const open = (wire: { readonly other: SchematicComponent }): boolean => drafted.has(wire.other) && !placed.has(wire.other);",
+		to: "const open = (wire: { readonly other: SchematicComponent }): boolean => !placed.has(wire.other);",
+		tests: ["tests/draft.test.ts"]
+	},
+	{
+		name: "a relation that reaches a drafted part waits for the draft",
+		file: "src/parser.ts",
+		from: "if (late.has(entry.component.id) || !entry.relations.some((relation) => late.has(relation.ref))) continue;",
+		to: "if (true) continue;",
+		tests: ["tests/draft.test.ts"]
+	},
+	{
+		name: "a document with no stated position starts at the draft origin",
+		file: "src/draft.ts",
+		from: "\tif (wholeDocument) {",
+		to: "\tif (false) {",
+		tests: ["tests/draft.test.ts"]
 	},
 	{
 		name: "a junction its net's copper already runs through joins the tree there",

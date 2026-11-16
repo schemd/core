@@ -54,6 +54,18 @@ export interface RelativeComponentSyntax {
 	readonly tail: Token;
 }
 
+/**
+ * A component declared with no position: `kind:ID "label" tail`. The draft
+ * placement pass gives it one from its wires.
+ */
+export interface UnplacedComponentSyntax {
+	readonly form: 'unplaced';
+	readonly kind: Token;
+	readonly id: Token;
+	readonly label: Token | undefined;
+	readonly tail: Token;
+}
+
 /** `A.port -> B.port tail`. */
 export interface ConnectionSyntax {
 	readonly form: 'connection';
@@ -64,7 +76,7 @@ export interface ConnectionSyntax {
 	readonly tail: Token;
 }
 
-export type DeclarationSyntax = AbsoluteComponentSyntax | RelativeComponentSyntax | ConnectionSyntax;
+export type DeclarationSyntax = AbsoluteComponentSyntax | RelativeComponentSyntax | UnplacedComponentSyntax | ConnectionSyntax;
 
 const ID = '[A-Za-z][A-Za-z0-9_-]*';
 const PORT = '[A-Za-z][A-Za-z0-9_+-]*';
@@ -75,6 +87,15 @@ const CONNECTION = new RegExp(`^(${ID})\\.(${PORT})\\s*->\\s*(${ID})\\.(${PORT})
 /* One relation each, sticky so it matches exactly where the last one ended. */
 const DIRECTION = new RegExp(`(right-of|left-of|above|below)\\s+(${ID})(?:\\.(${PORT}))?(?:\\s+by\\s+(${DECIMAL}))?(?:\\s+|$)`, 'yd');
 const ALIGNMENT = new RegExp(`(aligned-x|aligned-y)\\s+with\\s+(${ID})(?:\\.(${PORT}))?(?:\\s+at\\s+(${PORT}))?(?:\\s+|$)`, 'yd');
+
+/*
+ * A declaration with no position is `kind:ID "label"` and then exactly what
+ * follows a position in the other two forms: one colour, an option block, or
+ * both. Anything else after the head — a placement clause that did not scan,
+ * an empty label — stays an unrecognized declaration, as it always was.
+ */
+const PLACEMENT_WORD = /^(?:at|by|with|right-of|left-of|above|below|aligned-x|aligned-y)(?:\s|$)/;
+const UNPLACED_TAIL = /^(?:\[|(?:#[A-Za-z0-9_-]+|[A-Za-z]+\([^()]*\)|[A-Za-z][A-Za-z0-9_-]*)(?:\s+\[|\s*$))/;
 
 const SPACE = /\s/;
 
@@ -130,7 +151,8 @@ function placement(text: string, start: number): { relations: SchematicPlacement
  *
  * Tried in the order 0.x tried its patterns: an absolute component, then a
  * relative one (which needs at least one relation and a tail), then a
- * connection. `undefined` is an unrecognized declaration.
+ * component with no position, then a connection. `undefined` is an
+ * unrecognized declaration.
  */
 export function scanDeclaration(text: string): DeclarationSyntax | undefined {
 	const component = COMPONENT.exec(text);
@@ -150,6 +172,9 @@ export function scanDeclaration(text: string): DeclarationSyntax | undefined {
 				references: clause.references,
 				tail: { text: text.slice(clause.tail), start: clause.tail, end: text.length }
 			};
+		}
+		if (clause.relations.length === 0 && UNPLACED_TAIL.test(head[4]!) && !PLACEMENT_WORD.test(head[4]!)) {
+			return { form: 'unplaced', kind: token(head, 1), id: token(head, 2), label: optional(head, 3), tail: token(head, 4) };
 		}
 	}
 	const connection = CONNECTION.exec(text);

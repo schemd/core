@@ -24,7 +24,7 @@ import {
 	type RoutedConnection
 } from './layout.js';
 import { normalizeSchematicCanvas, resolveSchematicLimits } from './limits.js';
-import { parsedSchematicRoutes, parsedSchematicSheet } from './route-cache.js';
+import { parsedSchematicGeometry } from './route-cache.js';
 import type {
 	SchematicColor,
 	SchematicComponent,
@@ -107,22 +107,20 @@ function traceLine(document: SchematicDocument, route: RoutedConnection, index: 
 export function snapshotSchematic(document: SchematicDocument, fence: SchematicFence): string {
 	const canvas = normalizeSchematicCanvas(fence.bounds, 'Snapshot');
 	const limits = resolveSchematicLimits(fence.limits);
-	const cached = parsedSchematicRoutes(document, canvas);
 	const geometry =
-		cached === undefined
-			? validateSchematicGeometry(
-					document,
-					{ ...fence, bounds: canvas },
-					canvas === 'auto'
-						? undefined
-						: routeConnections(
-								document.connections,
-								new Map(document.components.map((component) => [component.id, component])),
-								canvas,
-								limits.wireCrossings
-							)
-				)
-			: { routes: cached, sheet: parsedSchematicSheet(document, canvas)! };
+		parsedSchematicGeometry(document, canvas) ??
+		validateSchematicGeometry(
+			document,
+			{ ...fence, bounds: canvas },
+			canvas === 'auto'
+				? undefined
+				: routeConnections(
+						document.connections,
+						new Map(document.components.map((component) => [component.id, component])),
+						canvas,
+						limits.wireCrossings
+					)
+		);
 	const routes = geometry.routes;
 	const bounds = geometry.sheet;
 
