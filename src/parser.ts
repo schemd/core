@@ -12,7 +12,7 @@
  * @packageDocumentation
  */
 import { fromMilli, parseMilli } from './geom.js';
-import { normalizeSchematicBounds, normalizeSchematicTitle, resolveSchematicLimits, type SchematicResolvedLimits } from './limits.js';
+import { normalizeSchematicBounds, normalizeSchematicCanvas, normalizeSchematicTitle, resolveSchematicLimits, type SchematicResolvedLimits } from './limits.js';
 import { validateSchematicGeometry } from './layout.js';
 import { fitComponents } from './fit.js';
 import { resolvePlacements, type PendingPlacement } from './placement.js';
@@ -45,7 +45,7 @@ import {
 
 export { parseSchematicColor };
 
-const SCHEMD_FENCE_PATTERN = /^(?:schemd|schematic)\s+bounds="(\d+)x(\d+)"(?:\s+title="([^"]+)")?\s*$/i;
+const SCHEMD_FENCE_PATTERN = /^(?:schemd|schematic)\s+bounds="(?:(\d+)x(\d+)|(auto))"(?:\s+title="([^"]+)")?\s*$/i;
 
 /* ---- provenance ---- */
 
@@ -105,11 +105,8 @@ interface NormalizedFence extends SchematicFence {
 function normalizeFence(value: unknown): NormalizedFence {
 	if (typeof value !== 'object' || value === null) throw new SchematicSyntaxError('Parser options must be an object.');
 	const candidate = value as Record<string, unknown>;
-	const rawBounds = candidate.bounds;
-	if (typeof rawBounds !== 'object' || rawBounds === null) throw new SchematicSyntaxError('Parser options require bounds.');
-	const fields = rawBounds as Record<string, unknown>;
 	return {
-		bounds: normalizeSchematicBounds(fields.width, fields.height, 'Schematic'),
+		bounds: normalizeSchematicCanvas(candidate.bounds, 'Schematic'),
 		title: normalizeSchematicTitle(candidate.title, 'Schematic'),
 		limits: resolveSchematicLimits(candidate.limits)
 	};
@@ -125,8 +122,8 @@ export function parseSchematicFence(info: string | undefined, defaultTitle = 'En
 	const match = SCHEMD_FENCE_PATTERN.exec(info.trim());
 	if (match === null) throw new SchematicSyntaxError('schemd fences require: schemd bounds="WIDTHxHEIGHT" title="Optional title".');
 	return {
-		bounds: normalizeSchematicBounds(Number(match[1]), Number(match[2]), 'Schematic'),
-		title: normalizeSchematicTitle(match[3] ?? defaultTitle, 'Schematic')
+		bounds: match[3] === undefined ? normalizeSchematicBounds(Number(match[1]), Number(match[2]), 'Schematic') : 'auto',
+		title: normalizeSchematicTitle(match[4] ?? defaultTitle, 'Schematic')
 	};
 }
 
@@ -692,13 +689,15 @@ function analyze(source: string, fence: SchematicFence, reporter: Reporter): Sch
 		return undefined;
 	}
 	const parsed = freezeDocument(document);
-	cacheParsedSchematicRoutes(parsed, normalized.bounds, geometry.routes);
+	cacheParsedSchematicRoutes(parsed, normalized.bounds, geometry.routes, geometry.sheet);
 	cacheParsedSchematicEvidence(parsed, placements, geometry.report);
 	return parsed;
 }
 
 /** Why an origin is outside the fence, or `undefined`. */
 function boundsOffences(component: SchematicComponent, fence: SchematicFence): string | undefined {
+	/* A measured sheet has no edge for an origin to be outside of. */
+	if (fence.bounds === 'auto') return undefined;
 	const offences: string[] = [];
 	if (component.x < 0 || component.x > fence.bounds.width) offences.push(`x is ${component.x}, and must be between 0 and ${fence.bounds.width}`);
 	if (component.y < 0 || component.y > fence.bounds.height) offences.push(`y is ${component.y}, and must be between 0 and ${fence.bounds.height}`);

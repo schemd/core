@@ -20,11 +20,11 @@
 import {
 	componentRectangle,
 	routeConnections,
-	validateDocumentGeometry,
+	validateSchematicGeometry,
 	type RoutedConnection
 } from './layout.js';
-import { normalizeSchematicBounds, resolveSchematicLimits } from './limits.js';
-import { parsedSchematicRoutes } from './route-cache.js';
+import { normalizeSchematicCanvas, resolveSchematicLimits } from './limits.js';
+import { parsedSchematicRoutes, parsedSchematicSheet } from './route-cache.js';
 import type {
 	SchematicColor,
 	SchematicComponent,
@@ -105,24 +105,30 @@ function traceLine(document: SchematicDocument, route: RoutedConnection, index: 
  * @returns A newline-terminated digest, stable across runs and platforms.
  */
 export function snapshotSchematic(document: SchematicDocument, fence: SchematicFence): string {
-	const bounds = normalizeSchematicBounds(fence.bounds.width, fence.bounds.height, 'Snapshot');
+	const canvas = normalizeSchematicCanvas(fence.bounds, 'Snapshot');
 	const limits = resolveSchematicLimits(fence.limits);
-	const routes =
-		parsedSchematicRoutes(document, bounds) ??
-		validateDocumentGeometry(
-			document,
-			{ ...fence, bounds },
-			routeConnections(
-				document.connections,
-				new Map(document.components.map((component) => [component.id, component])),
-				bounds,
-				limits.wireCrossings
-			)
-		);
+	const cached = parsedSchematicRoutes(document, canvas);
+	const geometry =
+		cached === undefined
+			? validateSchematicGeometry(
+					document,
+					{ ...fence, bounds: canvas },
+					canvas === 'auto'
+						? undefined
+						: routeConnections(
+								document.connections,
+								new Map(document.components.map((component) => [component.id, component])),
+								canvas,
+								limits.wireCrossings
+							)
+				)
+			: { routes: cached, sheet: parsedSchematicSheet(document, canvas)! };
+	const routes = geometry.routes;
+	const bounds = geometry.sheet;
 
 	const lines = [
 		`schemd-snapshot ${SCHEMATIC_SNAPSHOT_VERSION}`,
-		`bounds ${bounds.width}x${bounds.height}`,
+		canvas === 'auto' ? `bounds ${bounds.width}x${bounds.height} at ${bounds.x},${bounds.y}` : `bounds ${bounds.width}x${bounds.height}`,
 		...document.components.map(componentLine),
 		...routes.map((route, index) => traceLine(document, route, index))
 	];

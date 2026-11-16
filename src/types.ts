@@ -305,10 +305,32 @@ export interface SchematicLimitOptions {
 	readonly routingAttempts?: number;
 }
 
+/**
+ * The sheet a drawing occupies: its top-left corner and size, in coordinate units.
+ *
+ * A document compiled against declared bounds has a sheet of `0, 0, width,
+ * height`. A document compiled with `bounds: 'auto'` gets the smallest integer
+ * sheet that holds every part, label and wire with a fixed margin, so its
+ * corner is wherever the drawing begins.
+ */
+export interface SchematicSheet {
+	/** Left edge of the viewBox. */
+	readonly x: number;
+	/** Top edge of the viewBox. */
+	readonly y: number;
+	/** Horizontal viewBox extent. */
+	readonly width: number;
+	/** Vertical viewBox extent. */
+	readonly height: number;
+}
+
 /** Validated metadata parsed from a fenced `schemd` declaration. */
 export interface SchematicFence {
-	/** Static dimensions used to reserve layout space before browser paint. */
-	bounds: SchematicBounds;
+	/**
+	 * Static dimensions used to reserve layout space before browser paint, or
+	 * `'auto'` to have the compiler measure the sheet from the drawing.
+	 */
+	bounds: SchematicBounds | 'auto';
 	/** Accessible diagram title, supplied explicitly or by the host default. */
 	title: string;
 	/** Optional per-compilation resource budget; omitted fields keep defaults. */

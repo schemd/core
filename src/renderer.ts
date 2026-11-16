@@ -18,18 +18,18 @@ import {
 	isUmlComponent,
 	PORT_HOTSPOT_RADIUS,
 	routeConnections,
-	validateDocumentGeometry,
+	validateSchematicGeometry,
 	type RoutedConnection
 } from './layout.js';
 import {
 	MAX_SCHEMATIC_SVG_OUTPUT_BYTES,
-	normalizeSchematicBounds,
+	normalizeSchematicCanvas,
 	normalizeSchematicTitle,
 	resolveSchematicLimits,
 	type SchematicResolvedLimits
 } from './limits.js';
 import { assertParsedSchematicDocument } from './parser.js';
-import { parsedSchematicRoutes } from './route-cache.js';
+import { parsedSchematicRoutes, parsedSchematicSheet } from './route-cache.js';
 import { colorAttributes, TEXT_PAINT } from './symbols/common.js';
 import { definition, placedPorts, turnOf } from './symbols/index.js';
 import {
@@ -46,7 +46,8 @@ import {
 	type SchematicPoint,
 	type SchematicSemanticHook,
 	type SchematicSignalMarker,
-	type SchemdOutputMode
+	type SchemdOutputMode,
+	type SchematicSheet
 } from './types.js';
 import { MATH_LABEL_FONT_FAMILY, mathLabelText, renderMathLabelTspans } from './math-label.js';
 import { escapeXml } from './xml.js';
@@ -72,8 +73,8 @@ const INTERACTIVE_SVG_STYLES =
 
 /** Fully validated renderer options with required normalized defaults. */
 interface NormalizedCompileOptions extends CompileSchematicOptions {
-	/** Integer intrinsic canvas dimensions. */
-	bounds: { width: number; height: number };
+	/** Integer intrinsic canvas dimensions, or `'auto'` for a measured sheet. */
+	bounds: { width: number; height: number } | 'auto';
 	/** Non-empty accessible diagram title. */
 	title: string;
 	/** Explicit output-budget mode. */
@@ -232,12 +233,7 @@ function normalizeCompileOptions(value: unknown): NormalizedCompileOptions {
 		throw new SchematicSyntaxError('Render options must be an object.');
 	}
 	const candidate = value as Record<string, unknown>;
-	const rawBounds = candidate.bounds;
-	if (typeof rawBounds !== 'object' || rawBounds === null) {
-		throw new SchematicSyntaxError('Render options require bounds.');
-	}
-	const rawFields = rawBounds as Record<string, unknown>;
-	const bounds = normalizeSchematicBounds(rawFields.width, rawFields.height, 'Render');
+	const bounds = normalizeSchematicCanvas(candidate.bounds, 'Render');
 	const title = normalizeSchematicTitle(candidate.title, 'Render');
 	const idPrefix = candidate.idPrefix;
 	if (idPrefix !== undefined && (typeof idPrefix !== 'string' || idPrefix.length > 128)) {
@@ -689,6 +685,8 @@ export interface RenderedSchematic {
 	readonly svg: string;
 	/** Exact UTF-8 byte length of {@link svg}. */
 	readonly byteLength: number;
+	/** The sheet the drawing occupies: declared, or measured for `bounds: 'auto'`. */
+	readonly sheet: SchematicSheet;
 }
 
 /**
@@ -734,22 +732,31 @@ export function renderSchematicSized(
 	 * document against these exact bounds, so geometry is re-verified (and the
 	 * component map materialized) only for uncached bounds.
 	 */
-	const routedConnections =
-		parsedSchematicRoutes(document, normalized.bounds) ??
-		validateDocumentGeometry(
-			document,
-			normalized,
-			routeConnections(
-				document.connections,
-				new Map(document.components.map((component) => [component.id, component])),
-				normalized.bounds,
-				normalized.limits.wireCrossings
-			)
-		);
+	const canvas = normalized.bounds;
+	const cached = parsedSchematicRoutes(document, canvas);
+	const geometry =
+		cached === undefined
+			? validateSchematicGeometry(
+					document,
+					normalized,
+					canvas === 'auto'
+						? undefined
+						: routeConnections(
+								document.connections,
+								new Map(document.components.map((component) => [component.id, component])),
+								canvas,
+								normalized.limits.wireCrossings
+							)
+				)
+			: { routes: cached, sheet: parsedSchematicSheet(document, canvas)! };
+	const routedConnections = geometry.routes;
+	const sheet = geometry.sheet;
+	/* A declared canvas starts at the origin, and is written exactly as it always was. */
+	const origin = sheet.x === 0 && sheet.y === 0 ? '' : ` x="${sheet.x}" y="${sheet.y}"`;
 	/* Hashing serializes the entire AST, so the signature exists only when no idPrefix is supplied. */
 	const signatureHash = (): string =>
 		stableHash(
-			`${normalized.bounds.width}x${normalized.bounds.height}:${normalized.title}:${JSON.stringify(document)}`
+			`${canvas === 'auto' ? `${sheet.x},${sheet.y},` : ''}${sheet.width}x${sheet.height}:${normalized.title}:${JSON.stringify(document)}`
 		);
 	const candidatePrefix = (normalized.idPrefix ?? `schematic-${signatureHash()}`).replace(
 		/[^A-Za-z0-9_-]/g,
@@ -799,7 +806,7 @@ export function renderSchematicSized(
 	/* Any full-mode output contains focusable descendants, so the root must not flatten them. */
 	const svgRole = hooks ? 'group' : 'img';
 	writer.append(
-		`<figure class="schematic-frame"${hooks ? ' data-schematic' : ''}><svg class="schematic-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${normalized.bounds.width} ${normalized.bounds.height}" width="${normalized.bounds.width}" height="${normalized.bounds.height}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" font-family="${MATH_LABEL_FONT_FAMILY}" role="${svgRole}" aria-labelledby="${titleId} ${descriptionId}" preserveAspectRatio="xMidYMid meet"><title id="${titleId}">${title}</title><desc id="${descriptionId}">${description}</desc>${definitions === '' ? '' : `<defs>${definitions}</defs>`}${styles ? `<rect class="schematic-surface" width="100%" height="100%" /><rect class="schematic-grid" width="100%" height="100%" fill="url(#${gridId})" />` : ''}<g class="schematic-vectors">`
+		`<figure class="schematic-frame"${hooks ? ' data-schematic' : ''}><svg class="schematic-svg" xmlns="http://www.w3.org/2000/svg" viewBox="${sheet.x} ${sheet.y} ${sheet.width} ${sheet.height}" width="${sheet.width}" height="${sheet.height}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" font-family="${MATH_LABEL_FONT_FAMILY}" role="${svgRole}" aria-labelledby="${titleId} ${descriptionId}" preserveAspectRatio="xMidYMid meet"><title id="${titleId}">${title}</title><desc id="${descriptionId}">${description}</desc>${definitions === '' ? '' : `<defs>${definitions}</defs>`}${styles ? `<rect class="schematic-surface"${origin} width="100%" height="100%" /><rect class="schematic-grid"${origin} width="100%" height="100%" fill="url(#${gridId})" />` : ''}<g class="schematic-vectors">`
 	);
 	if (wireHooks) {
 		for (const [index, connection] of document.connections.entries()) {
@@ -826,5 +833,5 @@ export function renderSchematicSized(
 		);
 	}
 	writer.append(`</g></svg><figcaption>${title}</figcaption></figure>`);
-	return { svg: writer.finish(), byteLength: writer.byteLength };
+	return { svg: writer.finish(), byteLength: writer.byteLength, sheet };
 }

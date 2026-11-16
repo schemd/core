@@ -92,6 +92,20 @@ export function normalizeSchematicBounds(
 	return { width, height };
 }
 
+/**
+ * Read a caller's `bounds`: declared dimensions, or `'auto'` for a measured sheet.
+ *
+ * @param subject - Names the caller in the diagnostic: `Schematic` or `Render`.
+ */
+export function normalizeSchematicCanvas(raw: unknown, subject: string): SchematicBounds | 'auto' {
+	if (raw === 'auto') return raw;
+	if (typeof raw !== 'object' || raw === null) {
+		throw new SchematicSyntaxError(`${subject === 'Schematic' ? 'Parser' : subject} options require bounds.`);
+	}
+	const fields = raw as Record<string, unknown>;
+	return normalizeSchematicBounds(fields.width, fields.height, subject);
+}
+
 /** Longest accessible diagram title accepted from a fence or a host. */
 const MAX_TITLE_LENGTH = 512;
 
