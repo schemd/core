@@ -104,8 +104,21 @@ const BUDGETS = [
 		 * tree-shake out of this path; a document with no fitted part skips the
 		 * pass after one filter.
 		 */
-		maxGzipBytes: 44 * 1024,
-		maxBrotliBytes: 38.5 * 1024
+		/*
+		 * 46 KiB from 44, and 40 KiB brotli-11 from 38.5, for a measured sheet
+		 * and draft placement: 44,731 B to 46,407 B gzip, 38,894 B to 40,317 B
+		 * brotli-11. The sheet is 524 B — routing on an open canvas, measuring
+		 * parts, traces and wire labels, and writing a viewBox that starts where
+		 * the drawing does. The draft pass is 1,118 B: following each wire to a
+		 * part with no position, stepping aside when the place is taken, rows for
+		 * parts no wire reaches, and holding back the relations that refer to a
+		 * drafted part. Reading a missing `bounds` as `auto` is 34 B. Neither can
+		 * tree-shake out: a fence or a declaration with no position is syntax,
+		 * and `parseSchematic` reads both. A document that states its bounds and
+		 * every position skips both after one comparison each.
+		 */
+		maxGzipBytes: 46 * 1024,
+		maxBrotliBytes: 40 * 1024
 	},
 	{
 		label: 'Package bundle (every public export)',
@@ -118,8 +131,11 @@ const BUDGETS = [
 		   45 KiB for the measured text and layout fixes above. 47 KiB in 1.1, for
 		   fitting and terminal alignment as above, and the decompiler reading
 		   `fit=wires` back (45,948 B to 47,690 B gzip). */
-		maxGzipBytes: 47 * 1024,
-		maxBrotliBytes: 41 * 1024
+		/* 49 KiB and 42.5 KiB brotli-11 for the measured sheet and draft
+		   placement above plus the four draft constants and the sheet margin
+		   (47,806 B to 49,662 B gzip, 41,511 B to 43,120 B brotli-11). */
+		maxGzipBytes: 49 * 1024,
+		maxBrotliBytes: 42.5 * 1024
 	},
 	{
 		label: 'Schema entry (@schemd/core/schema)',
