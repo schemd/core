@@ -15,6 +15,7 @@ import {
 	parseSchematicFence,
 	renderSchematic,
 	SCHEMATIC_SHEET_MARGIN,
+	validateSchematicGeometry,
 	type SchematicFence
 } from '../src/index.js';
 import { snapshotSchematic } from '../src/snapshot.js';
@@ -40,12 +41,48 @@ describe('the fence', () => {
 		expect(parseSchematicFence('schemd bounds="AUTO" title="Filter"')).toEqual({ bounds: 'auto', title: 'Filter' });
 	});
 
-	test('still rejects anything that is neither dimensions nor auto', () => {
-		for (const info of ['schemd bounds="fit"', 'schemd bounds="autox100"', 'schemd bounds=""']) {
-			expect(() => parseSchematicFence(info)).toThrow(/schemd fences require/);
+	test('reads a fence with no bounds as bounds="auto"', () => {
+		expect(parseSchematicFence('schemd')).toEqual({ bounds: 'auto', title: 'Engineering schematic' });
+		expect(parseSchematicFence('schematic title="Filter"')).toEqual({ bounds: 'auto', title: 'Filter' });
+		expect(parseSchematicFence('  schemd   title="Filter"  ', 'Fallback')).toEqual({ bounds: 'auto', title: 'Filter' });
+	});
+
+	test('still reads declared dimensions, and still leaves another language alone', () => {
+		expect(parseSchematicFence('schemd bounds="640x260" title="Filter"')).toEqual({ bounds: { width: 640, height: 260 }, title: 'Filter' });
+		expect(parseSchematicFence('mermaid')).toBeUndefined();
+		expect(parseSchematicFence('schemdx')).toBeUndefined();
+	});
+
+	test('rejects bounds that are neither dimensions nor auto, and says what a fence is', () => {
+		for (const info of ['schemd bounds="fit"', 'schemd bounds="autox100"', 'schemd bounds=""', 'schemd bounds=auto', 'schemd width="640"', 'schemd title="A" bounds="auto"']) {
+			expect(() => parseSchematicFence(info)).toThrow(
+				'A schemd fence is: schemd bounds="WIDTHxHEIGHT" title="Optional title". Leave bounds out, or write bounds="auto", to have the sheet measured from the drawing.'
+			);
 		}
-		expect(() => parseSchematic(RC, { bounds: 'fit' as never, title: 'x' })).toThrow('Parser options require bounds.');
-		expect(() => renderSchematic(parseSchematic(RC, declared), { bounds: undefined as never, title: 'x' })).toThrow('Render options require bounds.');
+	});
+});
+
+describe('options', () => {
+	test('measure the sheet when bounds is left out, exactly as for auto', () => {
+		const title = 'Measured sheet';
+		const measured = compileSchematic(RC, auto);
+		expect(compileSchematic(RC, { title }).svg).toBe(measured.svg);
+		expect(compileSchematic(RC, { title }).sheet).toEqual(measured.sheet);
+		expect(renderSchematic(parseSchematic(RC, { title }), { title })).toBe(measured.svg);
+		expect(snapshotSchematic(parseSchematic(RC, { title }), { title })).toBe(snapshotSchematic(measured.document, auto));
+		/* The routes the parser cached for no bounds are the ones a render with 'auto' reuses. */
+		expect(renderSchematic(parseSchematic(RC, { title }), auto)).toBe(measured.svg);
+		/* The geometry check a host may call directly reads a missing bounds the same way. */
+		expect(validateSchematicGeometry(measured.document, { title }).sheet).toEqual(measured.sheet);
+	});
+
+	test('reject a bounds value that is neither dimensions nor auto, and say what to write', () => {
+		for (const bounds of ['fit', 5, null, true]) {
+			expect(() => parseSchematic(RC, { bounds: bounds as never, title: 'x' })).toThrow("Schematic bounds must be { width, height } or 'auto'; leave bounds out to have the sheet measured.");
+			expect(() => renderSchematic(parseSchematic(RC, declared), { bounds: bounds as never, title: 'x' })).toThrow("Render bounds must be { width, height } or 'auto'; leave bounds out to have the sheet measured.");
+			expect(() => snapshotSchematic(parseSchematic(RC, declared), { bounds: bounds as never, title: 'x' })).toThrow("Snapshot bounds must be { width, height } or 'auto'");
+		}
+		expect(() => compileSchematic(RC, { bounds: { width: 10, height: 10 }, title: 'x' })).toThrow(/bounds must be integers from 64/);
 	});
 });
 

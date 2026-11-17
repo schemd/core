@@ -93,14 +93,15 @@ export function normalizeSchematicBounds(
 }
 
 /**
- * Read a caller's `bounds`: declared dimensions, or `'auto'` for a measured sheet.
+ * Read a caller's `bounds`: declared dimensions, or a measured sheet when it is
+ * `'auto'` or left out.
  *
  * @param subject - Names the caller in the diagnostic: `Schematic` or `Render`.
  */
 export function normalizeSchematicCanvas(raw: unknown, subject: string): SchematicBounds | 'auto' {
-	if (raw === 'auto') return raw;
+	if (raw === undefined || raw === 'auto') return 'auto';
 	if (typeof raw !== 'object' || raw === null) {
-		throw new SchematicSyntaxError(`${subject === 'Schematic' ? 'Parser' : subject} options require bounds.`);
+		throw new SchematicSyntaxError(`${subject} bounds must be { width, height } or 'auto'; leave bounds out to have the sheet measured.`);
 	}
 	const fields = raw as Record<string, unknown>;
 	return normalizeSchematicBounds(fields.width, fields.height, subject);

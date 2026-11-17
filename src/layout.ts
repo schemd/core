@@ -1170,7 +1170,7 @@ function midpointOf(route: RoutedConnection): IPoint {
 
 /**
  * Validate final geometry: overlaps, every component inside the fence, and every
- * routed trace inside the fence. With `bounds: 'auto'` nothing can lie outside:
+ * routed trace inside the fence. With no bounds, or `'auto'`, nothing can lie outside:
  * the wires are routed on an open canvas and the sheet is measured around them.
  */
 export function validateSchematicGeometry(
@@ -1179,7 +1179,7 @@ export function validateSchematicGeometry(
 	routedConnections?: readonly RoutedConnection[]
 ): { readonly routes: readonly RoutedConnection[]; readonly report: SchematicRoutingReport; readonly sheet: SchematicSheet } {
 	validateOverlaps(document.components);
-	const bounds = fence.bounds;
+	const bounds = fence.bounds ?? 'auto';
 	const limits = resolveSchematicLimits(fence.limits);
 	const route = (): { readonly routes: readonly RoutedConnection[]; readonly report: SchematicRoutingReport } =>
 		routedConnections === undefined

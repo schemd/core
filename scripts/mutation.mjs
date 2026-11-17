@@ -742,6 +742,20 @@ const mutants = [
 		tests: ["tests/diagnose.test.ts"]
 	},
 	{
+		name: "options with no bounds ask for a measured sheet",
+		file: "src/limits.ts",
+		from: "\tif (raw === undefined || raw === 'auto') return 'auto';",
+		to: "\tif (raw === 'auto') return 'auto';",
+		tests: ["tests/auto-canvas.test.ts"]
+	},
+	{
+		name: "a fence with no bounds asks for a measured sheet",
+		file: "src/parser.ts",
+		from: "(?:\\s+bounds=\"(?:(\\d+)x(\\d+)|auto)\")?(?:\\s+title=",
+		to: "(?:\\s+bounds=\"(?:(\\d+)x(\\d+)|auto)\")(?:\\s+title=",
+		tests: ["tests/auto-canvas.test.ts"]
+	},
+	{
 		name: "a measured sheet keeps its margin around the drawing",
 		file: "src/layout.ts",
 		from: "\tconst margin = SCHEMATIC_SHEET_MARGIN * 1000;",

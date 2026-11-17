@@ -37,6 +37,7 @@ import {
 	type SchematicConnection,
 	type SchematicDiagnosticCode,
 	type SchematicDocument,
+	type SchematicBounds,
 	type SchematicEndpoint,
 	type SchematicFence,
 	type SchematicPlacementRelation,
@@ -46,7 +47,7 @@ import {
 
 export { parseSchematicColor };
 
-const SCHEMD_FENCE_PATTERN = /^(?:schemd|schematic)\s+bounds="(?:(\d+)x(\d+)|(auto))"(?:\s+title="([^"]+)")?\s*$/i;
+const SCHEMD_FENCE_PATTERN = /^(?:schemd|schematic)(?:\s+bounds="(?:(\d+)x(\d+)|auto)")?(?:\s+title="([^"]+)")?\s*$/i;
 
 /* ---- provenance ---- */
 
@@ -100,6 +101,7 @@ export function assertParsedSchematicDocument(document: SchematicDocument): void
 /* ---- fences ---- */
 
 interface NormalizedFence extends SchematicFence {
+	readonly bounds: SchematicBounds | 'auto';
 	readonly limits: SchematicResolvedLimits;
 }
 
@@ -121,10 +123,12 @@ function normalizeFence(value: unknown): NormalizedFence {
 export function parseSchematicFence(info: string | undefined, defaultTitle = 'Engineering schematic'): SchematicFence | undefined {
 	if (info === undefined || !/^(?:schemd|schematic)(?:\s|$)/i.test(info.trim())) return undefined;
 	const match = SCHEMD_FENCE_PATTERN.exec(info.trim());
-	if (match === null) throw new SchematicSyntaxError('schemd fences require: schemd bounds="WIDTHxHEIGHT" title="Optional title".');
+	if (match === null) {
+		throw new SchematicSyntaxError('A schemd fence is: schemd bounds="WIDTHxHEIGHT" title="Optional title". Leave bounds out, or write bounds="auto", to have the sheet measured from the drawing.');
+	}
 	return {
-		bounds: match[3] === undefined ? normalizeSchematicBounds(Number(match[1]), Number(match[2]), 'Schematic') : 'auto',
-		title: normalizeSchematicTitle(match[4] ?? defaultTitle, 'Schematic')
+		bounds: match[1] === undefined ? 'auto' : normalizeSchematicBounds(Number(match[1]), Number(match[2]), 'Schematic'),
+		title: normalizeSchematicTitle(match[3] ?? defaultTitle, 'Schematic')
 	};
 }
 
@@ -732,7 +736,7 @@ function analyze(source: string, fence: SchematicFence, reporter: Reporter): Sch
 }
 
 /** Why an origin is outside the fence, or `undefined`. */
-function boundsOffences(component: SchematicComponent, fence: SchematicFence): string | undefined {
+function boundsOffences(component: SchematicComponent, fence: NormalizedFence): string | undefined {
 	/* A measured sheet has no edge for an origin to be outside of. */
 	if (fence.bounds === 'auto') return undefined;
 	const offences: string[] = [];

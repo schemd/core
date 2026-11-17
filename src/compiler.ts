@@ -54,7 +54,7 @@ export interface SchematicCompilation {
 	readonly svg: string;
 	/**
 	 * The sheet the drawing occupies. For declared bounds this is `0, 0` and the
-	 * declared size; for `bounds: 'auto'` it is the sheet the compiler measured,
+	 * declared size; with no bounds, or `'auto'`, it is the sheet the compiler measured,
 	 * which is what a host needs to reserve space for the figure.
 	 */
 	readonly sheet: SchematicSheet;
@@ -113,7 +113,7 @@ export function compileSchematic(source: string, options: CompileSchematicOption
 	 */
 	const settled: CompileSchematicOptions = {
 		...options,
-		bounds: options.bounds === 'auto' ? options.bounds : { ...options.bounds },
+		bounds: options.bounds === undefined || options.bounds === 'auto' ? 'auto' : { ...options.bounds },
 		limits: resolveSchematicLimits(options.limits)
 	};
 	const document = parseSchematic(source, settled);
