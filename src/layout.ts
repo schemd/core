@@ -11,7 +11,7 @@
  */
 import { append, fmt, fromMilli, inflate, overlaps, contains, roundDiv, segmentContact, toMilli, type IPoint, type IRect } from './geom.js';
 import { mathLabelTextWidthAt } from './math-label.js';
-import { resolveSchematicLimits, SCHEMATIC_LIMITS } from './limits.js';
+import { MAX_SCHEMATIC_BOUND, MIN_SCHEMATIC_BOUND, resolveSchematicLimits, SCHEMATIC_LIMITS } from './limits.js';
 import { Buckets, compact, MAX_ROUTER_STATES, routeWires, type RouterFixed, type RouterObstacle, type RouterWire } from './route.js';
 import { canonicalName, halfExtents, placedPorts, resolvePlaced, turnOf, type PlacedPort } from './symbols/index.js';
 import { gateHeight } from './symbols/logic.js';
@@ -36,6 +36,7 @@ import {
 	type SchematicOrientation,
 	type SchematicPoint,
 	type SchematicQuarterTurn,
+	type SchematicSheet,
 	type UmlComponent
 } from './types.js';
 
@@ -1110,18 +1111,92 @@ function validateOverlaps(components: readonly SchematicComponent[]): void {
 	}
 }
 
+/** Clear space a measured sheet keeps around the drawing, in viewBox units. */
+export const SCHEMATIC_SHEET_MARGIN = 24;
+
+/**
+ * Measure the sheet a drawing needs: every part with its text, every trace and
+ * every wire label, plus {@link SCHEMATIC_SHEET_MARGIN} on each side, widened to
+ * whole units. A function of the document and its routes alone.
+ */
+function measureSheet(document: SchematicDocument, routes: readonly RoutedConnection[]): SchematicSheet {
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	const note = (x0: number, y0: number, x1: number, y1: number): void => {
+		minX = Math.min(minX, x0);
+		minY = Math.min(minY, y0);
+		maxX = Math.max(maxX, x1);
+		maxY = Math.max(maxY, y1);
+	};
+	for (const component of document.components) {
+		const extent = componentExtent(component);
+		note(extent.minX, extent.minY, extent.maxX, extent.maxY);
+	}
+	for (const [index, route] of routes.entries()) {
+		for (const point of route.points) note(toMilli(point.x), toMilli(point.y), toMilli(point.x), toMilli(point.y));
+		const label = labelRectAt(document.connections[index]!, midpointOf(route));
+		if (label !== undefined) note(label.minX, label.minY, label.maxX, label.maxY);
+	}
+	const margin = SCHEMATIC_SHEET_MARGIN * 1000;
+	let x = Math.floor((minX - margin) / 1000);
+	let y = Math.floor((minY - margin) / 1000);
+	let width = Math.ceil((maxX + margin) / 1000) - x;
+	let height = Math.ceil((maxY + margin) / 1000) - y;
+	/* A sheet narrower than the smallest declarable canvas is widened about its centre. */
+	const wider = Math.max(0, MIN_SCHEMATIC_BOUND - width);
+	const taller = Math.max(0, MIN_SCHEMATIC_BOUND - height);
+	x -= Math.floor(wider / 2);
+	y -= Math.floor(taller / 2);
+	width += wider;
+	height += taller;
+	if (width > MAX_SCHEMATIC_BOUND || height > MAX_SCHEMATIC_BOUND) {
+		throw new SchematicSyntaxError(
+			`The drawing spans ${width}x${height}, which is more than the ${MAX_SCHEMATIC_BOUND.toLocaleString('en-US')} units a sheet may measure on a side; move the parts closer together.`,
+			undefined,
+			undefined,
+			'geometry'
+		);
+	}
+	return { x, y, width, height };
+}
+
+/** A route's label anchor in milli-units, as the router and the renderer place it. */
+function midpointOf(route: RoutedConnection): IPoint {
+	const point = connectionLabelPoint(route);
+	return { x: toMilli(point.x), y: toMilli(point.y) };
+}
+
 /**
  * Validate final geometry: overlaps, every component inside the fence, and every
- * routed trace inside the fence.
+ * routed trace inside the fence. With no bounds, or `'auto'`, nothing can lie outside:
+ * the wires are routed on an open canvas and the sheet is measured around them.
  */
 export function validateSchematicGeometry(
 	document: SchematicDocument,
 	fence: SchematicFence,
 	routedConnections?: readonly RoutedConnection[]
-): { readonly routes: readonly RoutedConnection[]; readonly report: SchematicRoutingReport } {
+): { readonly routes: readonly RoutedConnection[]; readonly report: SchematicRoutingReport; readonly sheet: SchematicSheet } {
 	validateOverlaps(document.components);
-	const width = toMilli(fence.bounds.width);
-	const height = toMilli(fence.bounds.height);
+	const bounds = fence.bounds ?? 'auto';
+	const limits = resolveSchematicLimits(fence.limits);
+	const route = (): { readonly routes: readonly RoutedConnection[]; readonly report: SchematicRoutingReport } =>
+		routedConnections === undefined
+			? routeSchematicConnections(
+					document.connections,
+					new Map(document.components.map((component) => [component.id, component])),
+					bounds === 'auto' ? undefined : bounds,
+					limits.wireCrossings,
+					limits.routingAttempts
+				)
+			: { routes: routedConnections, report: EMPTY_REPORT };
+	if (bounds === 'auto') {
+		const routed = route();
+		return { ...routed, sheet: measureSheet(document, routed.routes) };
+	}
+	const width = toMilli(bounds.width);
+	const height = toMilli(bounds.height);
 	for (const component of document.components) {
 		const extent = componentExtent(component);
 		if (extent.minX >= 0 && extent.minY >= 0 && extent.maxX <= width && extent.maxY <= height) continue;
@@ -1130,37 +1205,27 @@ export function validateSchematicGeometry(
 		const units = (value: number) => roundDiv(value, 1000);
 		const overhang: string[] = [];
 		if (extent.minX < 0) overhang.push(`extends ${units(-extent.minX)} left of x=0; move ${component.id} to x >= ${units(x - extent.minX)}`);
-		if (extent.maxX > width) overhang.push(`extends ${units(extent.maxX - width)} past x=${fence.bounds.width}; move ${component.id} to x <= ${units(x - (extent.maxX - width))}`);
+		if (extent.maxX > width) overhang.push(`extends ${units(extent.maxX - width)} past x=${bounds.width}; move ${component.id} to x <= ${units(x - (extent.maxX - width))}`);
 		if (extent.minY < 0) overhang.push(`extends ${units(-extent.minY)} above y=0; move ${component.id} to y >= ${units(y - extent.minY)}`);
-		if (extent.maxY > height) overhang.push(`extends ${units(extent.maxY - height)} past y=${fence.bounds.height}; move ${component.id} to y <= ${units(y - (extent.maxY - height))}`);
+		if (extent.maxY > height) overhang.push(`extends ${units(extent.maxY - height)} past y=${bounds.height}; move ${component.id} to y <= ${units(y - (extent.maxY - height))}`);
 		throw new SchematicSyntaxError(
-			`${component.id} geometry exceeds the declared ${fence.bounds.width}x${fence.bounds.height} bounds: ${overhang.join(', and ')}. Widen the fence bounds if the diagram needs the room.`,
+			`${component.id} geometry exceeds the declared ${bounds.width}x${bounds.height} bounds: ${overhang.join(', and ')}. Widen the fence bounds if the diagram needs the room.`,
 			component.line,
 			undefined,
 			'geometry'
 		);
 	}
-	const limits = resolveSchematicLimits(fence.limits);
-	const routed =
-		routedConnections === undefined
-			? routeSchematicConnections(
-					document.connections,
-					new Map(document.components.map((component) => [component.id, component])),
-					fence.bounds,
-					limits.wireCrossings,
-					limits.routingAttempts
-				)
-			: { routes: routedConnections, report: EMPTY_REPORT };
+	const routed = route();
 	if (routed.routes.length !== document.connections.length) {
 		throw new TypeError('Routed connection count does not match the schematic document.');
 	}
 	for (const [index, connection] of document.connections.entries()) {
-		const route = routed.routes[index]!;
-		if (!route.points.every((point) => point.x >= 0 && point.y >= 0 && point.x <= fence.bounds.width && point.y <= fence.bounds.height)) {
+		const trace = routed.routes[index]!;
+		if (!trace.points.every((point) => point.x >= 0 && point.y >= 0 && point.x <= bounds.width && point.y <= bounds.height)) {
 			throw new SchematicSyntaxError('Connection trace exceeds the declared schematic bounds.', connection.line, undefined, 'routing');
 		}
 	}
-	return routed;
+	return { ...routed, sheet: { x: 0, y: 0, width: bounds.width, height: bounds.height } };
 }
 
 /** Validate a document's geometry and return only its routes. */

@@ -20,11 +20,11 @@
 import {
 	componentRectangle,
 	routeConnections,
-	validateDocumentGeometry,
+	validateSchematicGeometry,
 	type RoutedConnection
 } from './layout.js';
-import { normalizeSchematicBounds, resolveSchematicLimits } from './limits.js';
-import { parsedSchematicRoutes } from './route-cache.js';
+import { normalizeSchematicCanvas, resolveSchematicLimits } from './limits.js';
+import { parsedSchematicGeometry } from './route-cache.js';
 import type {
 	SchematicColor,
 	SchematicComponent,
@@ -105,24 +105,28 @@ function traceLine(document: SchematicDocument, route: RoutedConnection, index: 
  * @returns A newline-terminated digest, stable across runs and platforms.
  */
 export function snapshotSchematic(document: SchematicDocument, fence: SchematicFence): string {
-	const bounds = normalizeSchematicBounds(fence.bounds.width, fence.bounds.height, 'Snapshot');
+	const canvas = normalizeSchematicCanvas(fence.bounds, 'Snapshot');
 	const limits = resolveSchematicLimits(fence.limits);
-	const routes =
-		parsedSchematicRoutes(document, bounds) ??
-		validateDocumentGeometry(
+	const geometry =
+		parsedSchematicGeometry(document, canvas) ??
+		validateSchematicGeometry(
 			document,
-			{ ...fence, bounds },
-			routeConnections(
-				document.connections,
-				new Map(document.components.map((component) => [component.id, component])),
-				bounds,
-				limits.wireCrossings
-			)
+			{ ...fence, bounds: canvas },
+			canvas === 'auto'
+				? undefined
+				: routeConnections(
+						document.connections,
+						new Map(document.components.map((component) => [component.id, component])),
+						canvas,
+						limits.wireCrossings
+					)
 		);
+	const routes = geometry.routes;
+	const bounds = geometry.sheet;
 
 	const lines = [
 		`schemd-snapshot ${SCHEMATIC_SNAPSHOT_VERSION}`,
-		`bounds ${bounds.width}x${bounds.height}`,
+		canvas === 'auto' ? `bounds ${bounds.width}x${bounds.height} at ${bounds.x},${bounds.y}` : `bounds ${bounds.width}x${bounds.height}`,
 		...document.components.map(componentLine),
 		...routes.map((route, index) => traceLine(document, route, index))
 	];

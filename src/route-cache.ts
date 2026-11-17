@@ -1,31 +1,33 @@
 import type { RoutedConnection, SchematicRoutingReport } from './layout.js';
 import type { SchematicPlacement } from './placement.js';
-import type { SchematicBounds, SchematicDocument } from './types.js';
+import type { SchematicBounds, SchematicDocument, SchematicSheet } from './types.js';
 
 /** Parser-validated routes retained only while their immutable document is alive. */
 const parsedDocumentRoutes = new WeakMap<
 	SchematicDocument,
-	{ readonly width: number; readonly height: number; readonly routes: readonly RoutedConnection[] }
+	{ readonly key: string; readonly routes: readonly RoutedConnection[]; readonly sheet: SchematicSheet }
 >();
 
-/** Cache a validated route set against the bounds that produced it. */
+/** Routes are valid for the canvas they were validated against, declared or measured. */
+const canvasKey = (bounds: SchematicBounds | 'auto'): string => (bounds === 'auto' ? bounds : `${bounds.width}x${bounds.height}`);
+
+/** Cache a validated route set against the canvas that produced it. */
 export function cacheParsedSchematicRoutes(
 	document: SchematicDocument,
-	bounds: SchematicBounds,
-	routes: readonly RoutedConnection[]
+	bounds: SchematicBounds | 'auto',
+	routes: readonly RoutedConnection[],
+	sheet: SchematicSheet
 ): void {
-	parsedDocumentRoutes.set(document, { width: bounds.width, height: bounds.height, routes });
+	parsedDocumentRoutes.set(document, { key: canvasKey(bounds), routes, sheet });
 }
 
-/** Reuse routes only when render bounds match the parser's geometry contract. */
-export function parsedSchematicRoutes(
+/** Reuse routes, and the sheet they were validated on, only when the canvas matches the parser's. */
+export function parsedSchematicGeometry(
 	document: SchematicDocument,
-	bounds: SchematicBounds
-): readonly RoutedConnection[] | undefined {
+	bounds: SchematicBounds | 'auto'
+): { readonly routes: readonly RoutedConnection[]; readonly sheet: SchematicSheet } | undefined {
 	const cached = parsedDocumentRoutes.get(document);
-	return cached?.width === bounds.width && cached.height === bounds.height
-		? cached.routes
-		: undefined;
+	return cached?.key === canvasKey(bounds) ? cached : undefined;
 }
 
 /**

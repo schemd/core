@@ -16,6 +16,7 @@ export {
 	type SchematicNodeSource,
 	type SchematicWireSource
 } from './compiler.js';
+export { DRAFT_BAND_WIDTH, DRAFT_CLEARANCE, DRAFT_ORIGIN, DRAFT_PIN_GAP } from './draft.js';
 export {
 	resolvePlacements,
 	PLACEMENT_HORIZONTAL_GAP,
@@ -96,6 +97,7 @@ export {
 	SCHEMATIC_BRIDGE_RADIUS,
 	SCHEMATIC_CONGESTION_CELL_SIZE,
 	SCHEMATIC_OBSTACLE_CLEARANCE,
+	SCHEMATIC_SHEET_MARGIN,
 	validateDocumentGeometry,
 	validateSchematicGeometry,
 	type SchematicCongestionCell,
@@ -189,6 +191,7 @@ export {
 	type SchematicDocument,
 	type SchematicEndpoint,
 	type SchematicFence,
+	type SchematicSheet,
 	type SchematicLimitOptions,
 	type SchematicOrientation,
 	type SchematicFit,

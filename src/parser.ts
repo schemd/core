@@ -12,8 +12,9 @@
  * @packageDocumentation
  */
 import { fromMilli, parseMilli } from './geom.js';
-import { normalizeSchematicBounds, normalizeSchematicTitle, resolveSchematicLimits, type SchematicResolvedLimits } from './limits.js';
+import { normalizeSchematicBounds, normalizeSchematicCanvas, normalizeSchematicTitle, resolveSchematicLimits, type SchematicResolvedLimits } from './limits.js';
 import { validateSchematicGeometry } from './layout.js';
+import { draftPlacements } from './draft.js';
 import { fitComponents } from './fit.js';
 import { resolvePlacements, type PendingPlacement } from './placement.js';
 import { cacheParsedSchematicEvidence, cacheParsedSchematicRoutes } from './route-cache.js';
@@ -36,6 +37,7 @@ import {
 	type SchematicConnection,
 	type SchematicDiagnosticCode,
 	type SchematicDocument,
+	type SchematicBounds,
 	type SchematicEndpoint,
 	type SchematicFence,
 	type SchematicPlacementRelation,
@@ -45,7 +47,7 @@ import {
 
 export { parseSchematicColor };
 
-const SCHEMD_FENCE_PATTERN = /^(?:schemd|schematic)\s+bounds="(\d+)x(\d+)"(?:\s+title="([^"]+)")?\s*$/i;
+const SCHEMD_FENCE_PATTERN = /^(?:schemd|schematic)(?:\s+bounds="(?:(\d+)x(\d+)|auto)")?(?:\s+title="([^"]+)")?\s*$/i;
 
 /* ---- provenance ---- */
 
@@ -99,17 +101,15 @@ export function assertParsedSchematicDocument(document: SchematicDocument): void
 /* ---- fences ---- */
 
 interface NormalizedFence extends SchematicFence {
+	readonly bounds: SchematicBounds | 'auto';
 	readonly limits: SchematicResolvedLimits;
 }
 
 function normalizeFence(value: unknown): NormalizedFence {
 	if (typeof value !== 'object' || value === null) throw new SchematicSyntaxError('Parser options must be an object.');
 	const candidate = value as Record<string, unknown>;
-	const rawBounds = candidate.bounds;
-	if (typeof rawBounds !== 'object' || rawBounds === null) throw new SchematicSyntaxError('Parser options require bounds.');
-	const fields = rawBounds as Record<string, unknown>;
 	return {
-		bounds: normalizeSchematicBounds(fields.width, fields.height, 'Schematic'),
+		bounds: normalizeSchematicCanvas(candidate.bounds, 'Schematic'),
 		title: normalizeSchematicTitle(candidate.title, 'Schematic'),
 		limits: resolveSchematicLimits(candidate.limits)
 	};
@@ -123,9 +123,11 @@ function normalizeFence(value: unknown): NormalizedFence {
 export function parseSchematicFence(info: string | undefined, defaultTitle = 'Engineering schematic'): SchematicFence | undefined {
 	if (info === undefined || !/^(?:schemd|schematic)(?:\s|$)/i.test(info.trim())) return undefined;
 	const match = SCHEMD_FENCE_PATTERN.exec(info.trim());
-	if (match === null) throw new SchematicSyntaxError('schemd fences require: schemd bounds="WIDTHxHEIGHT" title="Optional title".');
+	if (match === null) {
+		throw new SchematicSyntaxError('A schemd fence is: schemd bounds="WIDTHxHEIGHT" title="Optional title". Leave bounds out, or write bounds="auto", to have the sheet measured from the drawing.');
+	}
 	return {
-		bounds: normalizeSchematicBounds(Number(match[1]), Number(match[2]), 'Schematic'),
+		bounds: match[1] === undefined ? 'auto' : normalizeSchematicBounds(Number(match[1]), Number(match[2]), 'Schematic'),
 		title: normalizeSchematicTitle(match[3] ?? defaultTitle, 'Schematic')
 	};
 }
@@ -516,6 +518,8 @@ function analyze(source: string, fence: SchematicFence, reporter: Reporter): Sch
 	const poisoned = new Set<string>();
 	const endpointSpans = new Map<SchematicConnection, EndpointSpans>();
 	const pending: PendingPlacement[] = [];
+	/* Parts whose declarations state no position; the draft pass places them from their wires. */
+	const drafted = new Set<SchematicComponent>();
 	for (const { syntax, source: line, prefix, dx, dy } of elaborated.declarations) {
 		if (syntax === undefined) {
 			reporter.report(new SchematicSyntaxError('Unrecognized schematic declaration.', line.line, span(line, undefined)));
@@ -598,6 +602,8 @@ function analyze(source: string, fence: SchematicFence, reporter: Reporter): Sch
 		if (syntax.form === 'absolute') {
 			const offences = boundsOffences(component, normalized);
 			if (offences !== undefined) reporter.report(new SchematicSyntaxError(offences, line.line, undefined, 'geometry'));
+		} else if (syntax.form === 'unplaced') {
+			drafted.add(component);
 		} else {
 			let relations: SchematicPlacementRelation[];
 			try {
@@ -628,16 +634,39 @@ function analyze(source: string, fence: SchematicFence, reporter: Reporter): Sch
 		return undefined;
 	}
 
-	let placements: ReturnType<typeof resolvePlacements> = [];
-	if (pending.length > 0) {
-		placements = resolvePlacements(components, pending, limits.placementDepth, (error) => reporter.report(error), poisoned);
+	/*
+	 * A relation that reaches a drafted part, directly or through another
+	 * relation, cannot be evaluated until the draft pass has run, and that pass
+	 * needs the connections checked below. Those relations wait; every other one
+	 * is resolved here, where it always was.
+	 */
+	const waiting: PendingPlacement[] = [];
+	if (drafted.size > 0) {
+		const late = new Set([...drafted].map((component) => component.id));
+		for (let grew = true; grew; ) {
+			grew = false;
+			for (const entry of pending) {
+				if (late.has(entry.component.id) || !entry.relations.some((relation) => late.has(relation.ref))) continue;
+				late.add(entry.component.id);
+				grew = true;
+			}
+		}
+		for (const entry of pending) if (late.has(entry.component.id)) waiting.push(entry);
+	}
+	const settled = waiting.length === 0 ? pending : pending.filter((entry) => !waiting.includes(entry));
+	const checkPlaced = (entries: readonly PendingPlacement[]): void => {
 		/* A placement that failed leaves its part unplaced, at its origin, not
 		   undeclared: every connection is still checked below, because a
 		   terminal's name depends on its part's kind, never on where it sits. */
-		for (const entry of pending) {
+		for (const entry of entries) {
 			const offences = boundsOffences(entry.component, normalized);
 			if (offences !== undefined) reporter.report(new SchematicSyntaxError(offences, entry.component.line, undefined, 'geometry'));
 		}
+	};
+	let placements: ReturnType<typeof resolvePlacements> = [];
+	if (settled.length > 0) {
+		placements = resolvePlacements(components, settled, limits.placementDepth, (error) => reporter.report(error), poisoned);
+		checkPlaced(settled);
 	}
 
 	const valid: SchematicConnection[] = [];
@@ -680,6 +709,15 @@ function analyze(source: string, fence: SchematicFence, reporter: Reporter): Sch
 	assignNets(valid, reporter);
 	resolveTrunks(valid, reporter);
 	if (reporter.failed) return undefined;
+	if (drafted.size > 0) {
+		const all = [...placements, ...draftPlacements(components, drafted, new Set(waiting.map((entry) => entry.component)), valid)];
+		if (waiting.length > 0) {
+			all.push(...resolvePlacements(components, waiting, limits.placementDepth, (error) => reporter.report(error), poisoned));
+			checkPlaced(waiting);
+			if (reporter.failed) return undefined;
+		}
+		placements = all.sort((left, right) => left.line - right.line);
+	}
 	fitComponents(components, valid, (error) => reporter.report(error, 'geometry'));
 	if (reporter.failed) return undefined;
 
@@ -692,13 +730,15 @@ function analyze(source: string, fence: SchematicFence, reporter: Reporter): Sch
 		return undefined;
 	}
 	const parsed = freezeDocument(document);
-	cacheParsedSchematicRoutes(parsed, normalized.bounds, geometry.routes);
+	cacheParsedSchematicRoutes(parsed, normalized.bounds, geometry.routes, geometry.sheet);
 	cacheParsedSchematicEvidence(parsed, placements, geometry.report);
 	return parsed;
 }
 
 /** Why an origin is outside the fence, or `undefined`. */
-function boundsOffences(component: SchematicComponent, fence: SchematicFence): string | undefined {
+function boundsOffences(component: SchematicComponent, fence: NormalizedFence): string | undefined {
+	/* A measured sheet has no edge for an origin to be outside of. */
+	if (fence.bounds === 'auto') return undefined;
 	const offences: string[] = [];
 	if (component.x < 0 || component.x > fence.bounds.width) offences.push(`x is ${component.x}, and must be between 0 and ${fence.bounds.width}`);
 	if (component.y < 0 || component.y > fence.bounds.height) offences.push(`y is ${component.y}, and must be between 0 and ${fence.bounds.height}`);

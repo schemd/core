@@ -5,7 +5,7 @@ import { assertParsedSchematicDocument, parseSchematic } from './parser.js';
 import type { SchematicPlacement } from './placement.js';
 import { renderSchematicSized } from './renderer.js';
 import { parsedSchematicEvidence } from './route-cache.js';
-import type { CompileSchematicOptions, SchematicDocument } from './types.js';
+import type { CompileSchematicOptions, SchematicDocument, SchematicSheet } from './types.js';
 
 /** Small, allocation-bounded compilation counters. */
 export interface SchematicCompilationMetrics {
@@ -52,6 +52,12 @@ export interface SchematicSourceMap {
 export interface SchematicCompilation {
 	readonly document: SchematicDocument;
 	readonly svg: string;
+	/**
+	 * The sheet the drawing occupies. For declared bounds this is `0, 0` and the
+	 * declared size; with no bounds, or `'auto'`, it is the sheet the compiler measured,
+	 * which is what a host needs to reserve space for the figure.
+	 */
+	readonly sheet: SchematicSheet;
 	readonly metrics: SchematicCompilationMetrics;
 	readonly sourceMap: SchematicSourceMap;
 	/**
@@ -107,15 +113,16 @@ export function compileSchematic(source: string, options: CompileSchematicOption
 	 */
 	const settled: CompileSchematicOptions = {
 		...options,
-		bounds: { ...options.bounds },
+		bounds: options.bounds === undefined || options.bounds === 'auto' ? 'auto' : { ...options.bounds },
 		limits: resolveSchematicLimits(options.limits)
 	};
 	const document = parseSchematic(source, settled);
-	const { svg, byteLength } = renderSchematicSized(document, settled);
+	const { svg, byteLength, sheet } = renderSchematicSized(document, settled);
 	const evidence = parsedSchematicEvidence(document);
 	return {
 		document,
 		svg,
+		sheet,
 		metrics: {
 			sourceCharacters: source.length,
 			components: document.components.length,

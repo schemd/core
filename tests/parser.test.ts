@@ -53,8 +53,10 @@ describe('parseSchematicFence', () => {
 		});
 	});
 
-	test('rejects missing metadata and each invalid bounds boundary', () => {
-		expect(() => parseSchematicFence('schemd')).toThrow(/require/);
+	test('rejects malformed metadata and each invalid bounds boundary', () => {
+		/* A fence with no bounds was an error through 1.3. It now asks for a measured sheet. */
+		expect(parseSchematicFence('schemd')).toEqual({ bounds: 'auto', title: 'Engineering schematic' });
+		expect(() => parseSchematicFence('schemd bounds=640x260')).toThrow(/A schemd fence is/);
 		expect(() => parseSchematicFence('schemd bounds="640x260"', '   ')).toThrow(
 			/titles cannot be empty/
 		);
