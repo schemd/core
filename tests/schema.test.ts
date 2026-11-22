@@ -11,7 +11,7 @@
  */
 import { describe, expect, test } from 'vitest';
 
-import { COMPONENT_KINDS, compileSchematic, diagnoseSchematic, SchematicSyntaxError, type SchematicFence } from '../src/index.js';
+import { COMPONENT_KINDS, compileSchematic, diagnoseSchematic, enumerateComponentPorts, parseSchematic, SchematicSyntaxError, type SchematicFence } from '../src/index.js';
 import { describeComponentPorts, SCHEMATIC_COMPONENT_SCHEMAS, type SchematicOptionSchema } from '../src/schema.js';
 
 const fence: SchematicFence = { bounds: { width: 4000, height: 4000 }, title: 'Schema' };
@@ -190,5 +190,42 @@ describe('describeComponentPorts', () => {
 
 	test('rejects an unknown kind', () => {
 		expect(() => describeComponentPorts('flux-capacitor')).toThrow('Unsupported component kind flux-capacitor.');
+	});
+
+	test('matches enumerateComponentPorts across every kind and every declared variant', () => {
+		for (const kind of kinds) {
+			const schema = SCHEMATIC_COMPONENT_SCHEMAS[kind as keyof typeof SCHEMATIC_COMPONENT_SCHEMAS];
+			const req = base(kind, '');
+			const parsed = parseSchematic(declaration(kind, req), fence).components[0]!;
+			expect(describeComponentPorts(kind, req), kind).toEqual(enumerateComponentPorts(parsed).map((p) => p.id));
+			const typeOpt = schema.options.find((o) => o.name === 'type' && o.type === 'enum');
+			if (typeOpt !== undefined && typeOpt.type === 'enum') {
+				for (const value of typeOpt.values) {
+					const opts = { ...req, type: value };
+					const comp = parseSchematic(declaration(kind, opts), fence).components[0]!;
+					expect(describeComponentPorts(kind, opts), `${kind} type=${value}`).toEqual(enumerateComponentPorts(comp).map((p) => p.id));
+				}
+			}
+		}
+	});
+
+	test('validates option types, bounds, conflicts, pins, and rows identically to the parser', () => {
+		expect(() => describeComponentPorts('cnot', { fit: 'wires', orientation: 'down' })).toThrow('fit=wires');
+		expect(() => describeComponentPorts('resistor', { type: 'bogus' })).toThrow('Option type must be one of');
+		expect(() => describeComponentPorts('resistor', { orientation: 'diagonal' })).toThrow('Option orientation must be one of');
+		expect(() => describeComponentPorts('and', { inputs: '0' })).toThrow('inputs must be an integer');
+		expect(() => describeComponentPorts('class', { width: '10' })).toThrow('width must be a finite number');
+		expect(describeComponentPorts('class', { width: '160', stereotype: 'service', attributes: 'a;b', operations: 'f()' })).toEqual(['left', 'right', 'top', 'bottom']);
+		expect(() => describeComponentPorts('class', { stereotype: '' })).toThrow('stereotype must contain');
+		expect(() => describeComponentPorts('class', { stereotype: 'x'.repeat(129) })).toThrow('stereotype must contain');
+		expect(describeComponentPorts('qgate', { parameter: 'theta' })).toEqual(['in', 'out']);
+		expect(() => describeComponentPorts('ic', {})).toThrow('An IC must declare at least one pin.');
+		expect(() => describeComponentPorts('ic', { left: Array.from({ length: 65 }, (_, i) => `P${i}`).join(',') })).toThrow('supports at most 64 IC pins');
+		expect(() => describeComponentPorts('ic', { left: '1BAD' })).toThrow('Invalid IC pin name');
+		expect(() => describeComponentPorts('ic', { left: 'A,' })).toThrow('Invalid IC pin name (empty)');
+		expect(() => describeComponentPorts('ic', { left: 'in' })).toThrow('collides with the reserved');
+		expect(() => describeComponentPorts('ic', { left: 'A,A' })).toThrow('Duplicate IC pin A');
+		expect(() => describeComponentPorts('class', { attributes: Array.from({ length: 65 }, (_, i) => `a${i}`).join(';') })).toThrow('supports at most 64 rows');
+		expect(() => describeComponentPorts('class', { attributes: 'a;;b' })).toThrow('attributes rows must contain');
 	});
 });

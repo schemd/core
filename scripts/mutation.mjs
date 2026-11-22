@@ -9,9 +9,9 @@ const mutants = [
 	{
 		name: "a closed marker keeps its trace out of a compound path",
 		file: "src/renderer.ts",
-		from: "\t\tconst key = markerAttributes.includes('marker-')",
-		to: "\t\tconst key = markerAttributes.includes('marker-') && false",
-		tests: ["tests/renderer.test.ts", "tests/regressions.test.ts"]
+		from: "\t\tconst key = ma.includes('marker-') ?",
+		to: "\t\tconst key = ma.includes('marker-') && false ?",
+		tests: ["tests/renderer.test.ts","tests/regressions.test.ts"]
 	},
 	{
 		name: "a caller-supplied budget is enforced, not merely accepted",
@@ -23,8 +23,8 @@ const mutants = [
 	{
 		name: "a misspelled budget field fails instead of being ignored",
 		file: "src/limits.ts",
-		from: "\t\tif (!CONFIGURABLE_LIMITS.includes(name)) {",
-		to: "\t\tif (false && CONFIGURABLE_LIMITS.includes(name)) {",
+		from: "\t\tif (!CONFIGURABLE_LIMITS.includes(name)) throw new SchematicSyntaxError",
+		to: "\t\tif (false && !CONFIGURABLE_LIMITS.includes(name)) throw new SchematicSyntaxError",
 		tests: ["tests/regressions.test.ts"]
 	},
 	{
@@ -44,15 +44,15 @@ const mutants = [
 	{
 		name: "an unconstrained axis inherits the first reference",
 		file: "src/placement.ts",
-		from: "\t\tlet position: IPoint = { x: seed.originX, y: seed.originY };",
-		to: "\t\tlet position: IPoint = { x: 0, y: 0 };",
+		from: "\t\tlet x = seed.originX;\n\t\tlet y = seed.originY;",
+		to: "\t\tlet x = 0;\n\t\tlet y = 0;",
 		tests: ["tests/placement.test.ts"]
 	},
 	{
 		name: "a direction measures from the reference body, not its origin",
 		file: "src/placement.ts",
-		from: "\t\treturn { ...milliRect(componentPlacementRectangle(component)), originX: toMilli(component.x), originY: toMilli(component.y) };",
-		to: "\t\treturn { minX: toMilli(component.x), maxX: toMilli(component.x), minY: toMilli(component.y), maxY: toMilli(component.y), originX: toMilli(component.x), originY: toMilli(component.y) };",
+		from: "\tif (rel.port === undefined) return { ...componentExtent(c, true), originX: toMilli(c.x), originY: toMilli(c.y) };",
+		to: "\tif (rel.port === undefined) return { minX: toMilli(c.x), maxX: toMilli(c.x), minY: toMilli(c.y), maxY: toMilli(c.y), originX: toMilli(c.x), originY: toMilli(c.y) };",
 		tests: ["tests/placement.test.ts"]
 	},
 	{
@@ -72,15 +72,15 @@ const mutants = [
 	{
 		name: "reported placements are ordered by source line",
 		file: "src/placement.ts",
-		from: "\treturn placements.sort((left, right) => left.line - right.line);",
-		to: "\treturn placements.sort((left, right) => right.line - left.line);",
+		from: "\treturn placements.sort((l, r) => l.line - r.line);",
+		to: "\treturn placements.sort((l, r) => r.line - l.line);",
 		tests: ["tests/placement.test.ts"]
 	},
 	{
 		name: "a declaration waits for every reference it names",
 		file: "src/placement.ts",
-		from: "\t\t\tif (remaining === 0) ready.push(dependent);",
-		to: "\t\t\tready.push(dependent);",
+		from: "\t\t\tif (rem === 0) ready.push(dep);",
+		to: "\t\t\tready.push(dep);",
 		tests: ["tests/placement.test.ts"]
 	},
 	{
@@ -128,36 +128,36 @@ const mutants = [
 	{
 		name: "the SVG writer refuses a chunk that overruns the budget",
 		file: "src/renderer.ts",
-		from: "\t\tif (read < chunk.length || written > remaining) throw this.#overBudget();",
-		to: "\t\tif (written > remaining) throw this.#overBudget();",
+		from: "\t\t\tif (written > rem) throw this.overBudget();",
+		to: "\t\t\tif (false) throw this.overBudget();",
 		tests: ["tests/byte-writer.test.ts"]
 	},
 	{
 		name: "a rejected SVG append commits nothing",
 		file: "src/renderer.ts",
-		from: "\t\tif (read < chunk.length || written > remaining) throw this.#overBudget();\n\t\tthis.#at += written;",
-		to: "\t\tthis.#at += written;\n\t\tif (read < chunk.length || written > remaining) throw this.#overBudget();",
+		from: "\t\t\tif (written > rem) throw this.overBudget();",
+		to: "\t\t\tif (written > rem) { this.at += written; throw this.overBudget(); }",
 		tests: ["tests/byte-writer.test.ts"]
 	},
 	{
 		name: "the SVG writer reports the size it actually wrote",
 		file: "src/renderer.ts",
-		from: "\treturn this.#at;",
-		to: "\treturn this.#buffer.length;",
-		tests: ["tests/byte-writer.test.ts", "tests/compiler.test.ts"]
+		from: "\t\treturn this.at;",
+		to: "\t\treturn this.limit;",
+		tests: ["tests/byte-writer.test.ts","tests/compiler.test.ts"]
 	},
 	{
 		name: "a branch joins the net at the end wired above it",
 		file: "src/parser.ts",
-		from: "connection.trunk = fromWired ? 'from' : 'to';",
-		to: "connection.trunk = 'from';",
+		from: "c.trunk = fW ? 'from' : 'to';",
+		to: "c.trunk = 'from';",
 		tests: ["tests/trunk.test.ts"]
 	},
 	{
 		name: "an instance parameter overrides the default",
 		file: "src/parser.ts",
-		from: "const value = supplied.get(parameter) ?? fallback;",
-		to: "const value = fallback ?? supplied.get(parameter);",
+		from: "const v = supplied.get(param) ?? fb;",
+		to: "const v = fb ?? supplied.get(param);",
 		tests: ["tests/subcircuit.test.ts"]
 	},
 	{
@@ -177,44 +177,44 @@ const mutants = [
 	{
 		name: "shared terminals must unify inferred nets",
 		file: "src/parser.ts",
-		from: "if (owner === undefined) terminals.set(key, index);\n\t\t\telse union(index, owner);",
-		to: "if (owner === undefined) terminals.set(key, index);\n\t\t\telse union(index, index);",
+		from: "if (o === undefined) terminals.set(k, i);\n\t\t\telse uf.join(i, o);",
+		to: "if (o === undefined) terminals.set(k, i);\n\t\t\telse uf.join(i, i);",
 		tests: ["tests/topology.test.ts"]
 	},
 	{
 		name: "equal explicit net names must unify disconnected terminals",
 		file: "src/parser.ts",
-		from: "if (owner === undefined) names.set(connection.net, index);\n\t\t\telse union(index, owner);",
-		to: "if (owner === undefined) names.set(connection.net, index);\n\t\t\telse union(index, index);",
+		from: "if (o === undefined) names.set(c.net, i);\n\t\t\telse uf.join(i, o);",
+		to: "if (o === undefined) names.set(c.net, i);\n\t\t\telse uf.join(i, i);",
 		tests: ["tests/topology.test.ts"]
 	},
 	{
 		name: "connector labels remain routing obstacles",
 		file: "src/layout.ts",
-		from: "label: connection.label === undefined ? undefined : (route) => labelRectAt(connection, midpoint(route))",
+		from: "label: c.label === undefined ? undefined : (route) => labelRectAt(c, midpoint(route))",
 		to: "label: undefined",
 		tests: ["tests/layout.test.ts"]
 	},
 	{
 		name: "port aliases resolve to one canonical terminal",
 		file: "src/parser.ts",
-		from: "connection.from.port = canonicalName(byId.get(connection.from.componentId)!, connection.from.port)!;",
-		to: "",
+		from: "cn.from.port = checkEnd(cn.from, false);",
+		to: "checkEnd(cn.from, false);",
 		tests: ["tests/regressions.test.ts"]
 	},
 	{
 		name: "vertically touching component bounds are not overlaps",
 		file: "src/geom.ts",
-		from: "left.maxY > right.minY",
-		to: "left.maxY >= right.minY",
-		tests: ["tests/geom.test.ts", "tests/layout.test.ts"]
+		from: "l.maxY > r.minY",
+		to: "l.maxY >= r.minY",
+		tests: ["tests/geom.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "a family set is derived from the registry it classifies",
 		file: "src/layout.ts",
 		from: "const UML = new Set<string>(UML_COMPONENT_KINDS);",
 		to: "const UML = new Set<string>();",
-		tests: ["tests/uml.test.ts", "tests/layout.test.ts"]
+		tests: ["tests/uml.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "a bridge never bulges into a neighbouring wire",
@@ -226,43 +226,43 @@ const mutants = [
 	{
 		name: "pin stubs of separate nets that touch are named, not routed",
 		file: "src/layout.ts",
-		from: "if (segmentContact(stub.a, stub.b, other.a, other.b) !== undefined) {",
+		from: "if (identity[o.index] !== identity[s.index] && segmentContact(s.a, s.b, o.a, o.b) !== undefined) {",
 		to: "if (false) {",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts"]
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts"]
 	},
 	{
 		name: "a drawn wire may not pass through a foreign terminal",
 		file: "src/layout.ts",
-		from: "if (segmentContact(chords[step - 1]!, chords[step]!, at, at) === undefined) continue;",
-		to: "continue;",
+		from: "if (segmentContact(chords[s - 1]!, chords[s]!, at, at) !== undefined) {",
+		to: "if (false) {",
 		tests: ["tests/layout.test.ts"]
 	},
 	{
 		name: "a pin exit through its own text turns only beyond it",
 		file: "src/layout.ts",
-		from: "if (placed.normal.y < 0 && rect.minY < escape.y && rect.maxY > escape.y - clearance) escape = { x: escape.x, y: rect.minY };",
+		from: "if (placed.normal.y < 0 && r.minY < esc.y && r.maxY > esc.y - clearance) esc = { x: esc.x, y: r.minY };",
 		to: "",
-		tests: ["tests/regressions.test.ts", "tests/layout.test.ts"]
+		tests: ["tests/regressions.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "congestion cells are reported in a stable order",
 		file: "src/layout.ts",
-		from: "congestion: [...cells.values()].sort((left, right) => left.x - right.x || left.y - right.y)",
-		to: "congestion: [...cells.values()].reverse()",
+		from: "congestion: [...cells.values()].sort((l, r) => l.x - r.x || l.y - r.y),",
+		to: "congestion: [...cells.values()].reverse(),",
 		tests: ["tests/regressions.test.ts"]
 	},
 	{
 		name: "a contested location costs every net, touching or not",
 		file: "src/route.ts",
-		from: "let cost = g + length * (soft === 2 ? 2 : 1) + history;",
-		to: "let cost = g + length * (soft === 2 ? 2 : 1);",
+		from: "let cost = g + len * (soft === 2 ? 2 : 1) + hist;",
+		to: "let cost = g + len * (soft === 2 ? 2 : 1);",
 		tests: ["tests/route.test.ts"]
 	},
 	{
 		name: "no shortcut retakes a priced track",
 		file: "src/route.ts",
-		from: "if (this.#history.size > 0) return undefined;",
-		to: "",
+		from: "if ((a.x !== b.x && a.y !== b.y) || sameAs(a, b) || history.size > 0) return undefined;",
+		to: "if ((a.x !== b.x && a.y !== b.y) || sameAs(a, b)) return undefined;",
 		tests: ["tests/route.test.ts"]
 	},
 	{
@@ -275,22 +275,22 @@ const mutants = [
 	{
 		name: "routing order is geometric, not declaration order",
 		file: "src/route.ts",
-		from: "\t\t\t\tleft.key[0] - right.key[0] ||\n\t\t\t\tleft.key[1] - right.key[1] ||\n\t\t\t\tleft.key[2] - right.key[2] ||\n\t\t\t\tleft.key[3] - right.key[3] ||\n",
+		from: "\t\t\ta.key[0] - b.key[0] ||\n\t\t\ta.key[1] - b.key[1] ||\n\t\t\ta.key[2] - b.key[2] ||\n\t\t\ta.key[3] - b.key[3] ||\n",
 		to: "",
 		tests: ["tests/route.test.ts"]
 	},
 	{
 		name: "a short detour beats an avoidable bridge",
 		file: "src/route.ts",
-		from: "if (better !== undefined && better.crossings < found.crossings) return better.path;",
-		to: "if (false) return better.path;",
+		from: "if (better !== undefined && better.crossings < first.crossings) return better;",
+		to: "if (false) return better;",
 		tests: ["tests/route.test.ts"]
 	},
 	{
 		name: "a tree never meets four ways",
 		file: "src/route.ts",
-		from: "if (degree < 3 && !crowded) startCells.push(cell);",
-		to: "if (!crowded) startCells.push(cell);",
+		from: "if (deg >= 3) continue;",
+		to: "",
 		tests: ["tests/route.test.ts"]
 	},
 	{
@@ -303,42 +303,42 @@ const mutants = [
 	{
 		name: "a stub through a third body is reported",
 		file: "src/route.ts",
-		from: "if (blocked >= 0) return fail(blocked, 'unroutable', 0);",
+		from: "return fail(i, 'unroutable', 0);",
 		to: "",
-		tests: ["tests/route.test.ts", "tests/layout.test.ts"]
+		tests: ["tests/route.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "text holding an escape point cannot wall it in",
 		file: "src/route.ts",
-		from: "\t\t\t\tif (!holdsEscape(obstacle.rect)) block(obstacle.rect);",
-		to: "\t\t\t\tblock(obstacle.rect);",
-		tests: ["tests/regressions.test.ts", "tests/layout.test.ts"]
+		from: "\t\t\t\tif (!holdsEscape(ob.rect)) block(ob.rect);",
+		to: "\t\t\t\tblock(ob.rect);",
+		tests: ["tests/regressions.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "torn-up copper no longer occupies the canvas",
 		file: "src/route.ts",
-		from: "return this.#copper.query(rect).filter((piece) => piece.dead !== true);",
-		to: "return this.#copper.query(rect);",
+		from: "if (p.dead || (p.a.x < win.minX",
+		to: "if ((p.a.x < win.minX",
 		tests: ["tests/route.test.ts"]
 	},
 	{
 		name: "a wire ending on another net is a contact",
 		file: "src/route.ts",
-		from: "if (along >= low && along <= high) flag(piece, other, end);",
+		from: "if (o.net !== p.net && along >= lo(o, !h) && along <= hi(o, !h)) flag(p, o, end);",
 		to: "",
 		tests: ["tests/route.test.ts"]
 	},
 	{
 		name: "the router heap prefers the deeper of two equal estimates",
 		file: "src/route.ts",
-		from: "return f1 !== f2 ? f1 < f2 : g1 !== g2 ? g1 > g2 : s1 < s2;",
-		to: "return f1 !== f2 ? f1 < f2 : s1 < s2;",
-		tests: ["tests/route.test.ts", "tests/regressions.test.ts", "tests/trunk.test.ts", "tests/layout.test.ts"]
+		from: "f1 < f2 || (f1 === f2 && (g1 > g2 || (g1 === g2 && s1 < s2)));",
+		to: "f1 < f2 || (f1 === f2 && s1 < s2);",
+		tests: ["tests/route.test.ts","tests/regressions.test.ts","tests/trunk.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "rounding is symmetric about zero",
 		file: "src/geom.ts",
-		from: "const rounded = Math.floor(quotient + 0.5);\n\treturn numerator < 0 ? -rounded : rounded;",
+		from: "const rounded = Math.floor(Math.abs(numerator) / denominator + 0.5);\n\treturn numerator < 0 ? -rounded : rounded;",
 		to: "return Math.round(numerator / denominator);",
 		tests: ["tests/geom.test.ts"]
 	},
@@ -352,35 +352,35 @@ const mutants = [
 	{
 		name: "formatted decimals carry no trailing zeros",
 		file: "src/geom.ts",
-		from: "while (digits.endsWith('0')) digits = digits.slice(0, -1);",
+		from: "while (d.endsWith('0')) d = d.slice(0, -1);",
 		to: "",
 		tests: ["tests/geom.test.ts"]
 	},
 	{
 		name: "a fourth decimal rounds the milli-unit",
 		file: "src/geom.ts",
-		from: "if (fraction.length > 3 && fraction.charCodeAt(3) >= 53) value += 1;",
+		from: "if (frac.length > 3 && frac.charCodeAt(3) >= 53) val += 1;",
 		to: "",
 		tests: ["tests/geom.test.ts"]
 	},
 	{
 		name: "an unknown endpoint is reported at its token",
 		file: "src/parser.ts",
-		from: "checkEndpoint(connection.from, byId, connection.line, fromId, fromPort);",
-		to: "checkEndpoint(connection.from, byId, connection.line, undefined, undefined);",
+		from: "throw new SchematicSyntaxError(`Unknown component ${ep.componentId}.`, cn.line, sp, 'reference');",
+		to: "throw new SchematicSyntaxError(`Unknown component ${ep.componentId}.`, cn.line, undefined, 'reference');",
 		tests: ["tests/diagnose.test.ts"]
 	},
 	{
 		name: "a failed component is not blamed again by its wires",
 		file: "src/parser.ts",
-		from: "if (poisoned.has(connection.from.componentId) || poisoned.has(connection.to.componentId)) continue;",
+		from: "if (poisoned.has(cn.from.componentId) || poisoned.has(cn.to.componentId)) continue;",
 		to: "",
 		tests: ["tests/diagnose.test.ts"]
 	},
 	{
 		name: "diagnostics are listed in source order",
 		file: "src/parser.ts",
-		from: "return reporter.diagnostics.sort((left, right) => left.line! - right.line!);",
+		from: "return reporter.diagnostics.sort((l, r) => l.line! - r.line!);",
 		to: "return reporter.diagnostics;",
 		tests: ["tests/diagnose.test.ts"]
 	},
@@ -394,15 +394,15 @@ const mutants = [
 	{
 		name: "copied coordinates are offset by the instance position",
 		file: "src/parser.ts",
-		from: "x: fromMilli(parseMilli(syntax.x.text) + dx)",
-		to: "x: fromMilli(parseMilli(syntax.x.text))",
+		from: "fromMilli(parseMilli(syntax.x.text) + dx)",
+		to: "fromMilli(parseMilli(syntax.x.text))",
 		tests: ["tests/subcircuit.test.ts"]
 	},
 	{
 		name: "nested instance offsets compose",
 		file: "src/parser.ts",
-		from: "dx + parseMilli(instance[3]!), dy + parseMilli(instance[4]!)",
-		to: "parseMilli(instance[3]!), parseMilli(instance[4]!)",
+		from: "dx + parseMilli(inst[3]!), dy + parseMilli(inst[4]!)",
+		to: "parseMilli(inst[3]!), parseMilli(inst[4]!)",
 		tests: ["tests/subcircuit.test.ts"]
 	},
 	{
@@ -415,14 +415,14 @@ const mutants = [
 	{
 		name: "an alias names the terminal drawn at its point",
 		file: "src/symbols/index.ts",
-		from: "return ports.find((entry) => entry.x === local.x && entry.y === local.y)?.id ?? local.id;",
+		from: "return ports.find((e) => e.x === local.x && e.y === local.y)?.id ?? local.id;",
 		to: "return local.id;",
 		tests: ["tests/ports.test.ts"]
 	},
 	{
 		name: "reset accepts the numbered spellings of its one track",
 		file: "src/symbols/quantum.ts",
-		from: "if (component.kind === 'reset' && /^(in|out)1$/.test(name)) name = name.slice(0, -1);",
+		from: "if (c.kind === 'reset' && /^(in|out)1$/.test(name)) name = name.slice(0, -1);",
 		to: "",
 		tests: ["tests/ports.test.ts"]
 	},
@@ -431,7 +431,7 @@ const mutants = [
 		file: "src/symbols/index.ts",
 		from: "{ right: 0, down: 1, left: 2, up: 3 }",
 		to: "{ right: 0, down: 3, left: 2, up: 1 }",
-		tests: ["tests/ports.test.ts", "tests/primitives.test.ts"]
+		tests: ["tests/ports.test.ts","tests/primitives.test.ts"]
 	},
 	{
 		name: "a battery's long plate is on its positive terminal",
@@ -464,22 +464,22 @@ const mutants = [
 	{
 		name: "a relation is read only where the last one ended",
 		file: "src/syntax.ts",
-		from: "(?:\\\\s+by\\\\s+(${DECIMAL}))?(?:\\\\s+|$)`, 'yd');",
-		to: "(?:\\\\s+by\\\\s+(${DECIMAL}))?(?:\\\\s+|$)`, 'gd');",
+		from: "(?:\\\\s+by\\\\s+(${DEC}))?(?:\\\\s+|$)`, 'yd');",
+		to: "(?:\\\\s+by\\\\s+(${DEC}))?(?:\\\\s+|$)`, 'gd');",
 		tests: ["tests/syntax.test.ts"]
 	},
 	{
 		name: "a relative declaration needs a tail after its relations",
 		file: "src/syntax.ts",
-		from: "if (clause.relations.length > 0 && clause.tail < text.length) {",
-		to: "if (clause.relations.length > 0) {",
+		from: "if (relations.length > 0 && cur < text.length) {",
+		to: "if (relations.length > 0) {",
 		tests: ["tests/syntax.test.ts"]
 	},
 	{
 		name: "a token reports the columns it sits at",
 		file: "src/syntax.ts",
-		from: "const [start, end] = match.indices![group]!;\n\treturn { text: match[group]!, start, end };",
-		to: "return { text: match[group]!, start: 0, end: match[group]!.length };",
+		from: "const idx = m.indices?.[g];\n\treturn { text: m[g]!, start: idx ? idx[0] : 0, end: idx ? idx[1] : 0 };",
+		to: "return { text: m[g]!, start: 0, end: m[g]!.length };",
 		tests: ["tests/diagnose.test.ts"]
 	},
 	{
@@ -487,153 +487,153 @@ const mutants = [
 		file: "src/route.ts",
 		from: "const heading = mode === 'point' ? axes[0] : 0;",
 		to: "const heading = 0;",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/trunk.test.ts"]
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "a pin is never entered from behind, along its own stub",
 		file: "src/route.ts",
-		from: "if (along[index] === to) continue;",
-		to: "continue;",
-		tests: ["tests/layout.test.ts", "tests/route.test.ts", "tests/regressions.test.ts"]
+		from: "if (isEnd && along[idx] !== to) sNode[cell] = sNode[cell]! | AVOID;",
+		to: "",
+		tests: ["tests/layout.test.ts","tests/route.test.ts","tests/regressions.test.ts"]
 	},
 	{
 		name: "a free pin is never passed through",
 		file: "src/layout.ts",
-		from: "\t\t\tif (wired.has(`${component.id}.${port.id}`)) continue;",
+		from: "\t\t\tif (wired.has(key)) continue;",
 		to: "\t\t\tcontinue;",
 		tests: ["tests/regressions.test.ts"]
 	},
 	{
 		name: "a wire runs inside its own component's clearance only at a price",
 		file: "src/route.ts",
-		from: "let cost = g + length * (soft === 2 ? 2 : 1) + history;",
-		to: "let cost = g + length + history;",
-		tests: ["tests/regressions.test.ts", "tests/layout.test.ts", "tests/trunk.test.ts"]
+		from: "let cost = g + len * (soft === 2 ? 2 : 1) + hist;",
+		to: "let cost = g + len + hist;",
+		tests: ["tests/regressions.test.ts","tests/layout.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "entering same-net copper away from the target is charged as a crossing",
 		file: "src/route.ts",
-		from: "if ((nextFlags & (OWN | SAME)) !== 0 && next !== targetCell) cost += SAME_NET_CROSSING;",
-		to: "if ((nextFlags & OWN) !== 0 && next !== targetCell) cost += SAME_NET_CROSSING;",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		from: "if ((nf & (OWN | SAME)) !== 0 && next !== targetCell) cost += SAME_NET_CROSSING;",
+		to: "if ((nf & OWN) !== 0 && next !== targetCell) cost += SAME_NET_CROSSING;",
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "a lead of another net is contact, not open board",
 		file: "src/route.ts",
-		from: "\t\t\t\t\tif ((flags & OTHER_END) !== 0) penalty += contact;",
-		to: "\t\t\t\t\tif ((flags & OTHER_END) !== 0) penalty += 0;",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		from: "\t\t\t\t\t\tif ((flags & OTHER_END) !== 0) pen += contact;",
+		to: "\t\t\t\t\t\tif ((flags & OTHER_END) !== 0) pen += 0;",
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "a loop is drawn along copper the net already has",
 		file: "src/route.ts",
-		from: "const along =\n\t\t\tloops.length === 0\n\t\t\t\t? undefined",
-		to: "const along =\n\t\t\ttrue\n\t\t\t\t? undefined",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		from: "if (loops.length > 0) {",
+		to: "if (false && loops.length > 0) {",
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "a connection end joins the tree only where it carries no arrow",
 		file: "src/route.ts",
-		from: "return fromIn ? wire.joinFrom : wire.joinTo;",
-		to: "return fromIn ? wire.joinTo : wire.joinFrom;",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		from: "const mayJoin = freeIsTo ? w.joinFrom : w.joinTo;",
+		to: "const mayJoin = freeIsTo ? w.joinTo : w.joinFrom;",
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "equal-key drafts are ordered by their endpoints, not by source order",
 		file: "src/route.ts",
-		from: "\t\t\t\tNumber(signature.get(left)! > signature.get(right)!) - Number(signature.get(left)! < signature.get(right)!) ||\n",
+		from: "\t\t\t(a.sig > b.sig ? 1 : a.sig < b.sig ? -1 : 0) ||\n",
 		to: "",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "a same-net crossing is marked with a dot",
 		file: "src/layout.ts",
-		from: "if (!inside || seen.has(key)) continue;",
+		from: "if (seenJoins.has(key)) continue;",
 		to: "if (true) continue;",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "the renderer draws every same-net dot, not only the junction",
 		file: "src/renderer.ts",
-		from: "\tconst junction = [...(routed.junction === undefined ? [] : [routed.junction]), ...(routed.joins ?? [])]",
-		to: "\tconst junction = [...(routed.junction === undefined ? [] : [routed.junction])]",
-		tests: ["tests/renderer.test.ts", "tests/regressions.test.ts"]
+		from: "\tif (routed.joins !== undefined) for (const p of routed.joins) jDots += dot(p);",
+		to: "",
+		tests: ["tests/renderer.test.ts","tests/regressions.test.ts"]
 	},
 	{
 		name: "batched output dots every same-net crossing too",
 		file: "src/renderer.ts",
-		from: "\t\tfor (const point of [...(routed.junction === undefined ? [] : [routed.junction]), ...(routed.joins ?? [])]) {",
-		to: "\t\tfor (const point of [...(routed.junction === undefined ? [] : [routed.junction])]) {",
-		tests: ["tests/renderer.test.ts", "tests/regressions.test.ts"]
+		from: "\t\tif (routed.joins !== undefined) for (const p of routed.joins) b.endpoints.push(dotD(p));",
+		to: "",
+		tests: ["tests/renderer.test.ts","tests/regressions.test.ts"]
 	},
 	{
 		name: "copper drawn twice on one row is one crossing",
 		file: "src/layout.ts",
-		from: "\t\t\t\tif (crossings.get(step - 1)?.includes(run.y) === true) continue;\n",
+		from: "\t\t\t\tif (crossings.get(s - 1)?.includes(run.y) === true) continue;\n",
 		to: "",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "a bridge stops short of its own net joining the run",
 		file: "src/layout.ts",
-		from: "limit = Math.min(limit, Math.floor((Math.abs(ty - y) - 1) / 1000) * 1000);",
-		to: "limit = Math.min(limit, radius);",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		from: "if (d <= radius) limit = Math.min(limit, Math.floor((d - 1) / 1000) * 1000);",
+		to: "if (d <= radius) limit = Math.min(limit, radius);",
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "a lead is never run through another body",
 		file: "src/layout.ts",
-		from: "if (body.owner === owner || (facing && (body.owner === connection.from.componentId || body.owner === connection.to.componentId)) || !segmentEntersRect(stub.a, stub.b, body.rect)) continue;",
-		to: "if (body.owner === owner || body.owner === connection.from.componentId || body.owner === connection.to.componentId || !segmentEntersRect(stub.a, stub.b, body.rect)) continue;",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		from: "if (body.owner === s.owner || (facing && (body.owner === c.from.componentId || body.owner === c.to.componentId)) || !segmentEntersRect(s.a, s.b, body.rect)) continue;",
+		to: "if (body.owner === s.owner || body.owner === c.from.componentId || body.owner === c.to.componentId || !segmentEntersRect(s.a, s.b, body.rect)) continue;",
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "a lead is never run into a free pin",
 		file: "src/layout.ts",
-		from: "if (free.owner === owner || segmentContact(stub.a, stub.b, free.point, free.point) === undefined) continue;",
-		to: "continue;",
-		tests: ["tests/layout.test.ts", "tests/regressions.test.ts", "tests/route.test.ts", "tests/trunk.test.ts"]
+		from: "if (free.owner !== s.owner && segmentContact(s.a, s.b, free.point, free.point) !== undefined) {",
+		to: "if (false) {",
+		tests: ["tests/layout.test.ts","tests/regressions.test.ts","tests/route.test.ts","tests/trunk.test.ts"]
 	},
 	{
 		name: "a register numbers its extra inputs from two",
 		file: "src/symbols/logic.ts",
-		from: "left: ['in', ...range('in', component.inputs).slice(1)],",
-		to: "left: ['in', ...range('in', component.inputs)],",
-		tests: ["tests/ports.test.ts", "tests/regressions.test.ts", "tests/layout.test.ts"]
+		from: "left: ['in', ...range('in', c.inputs).slice(1)],",
+		to: "left: ['in', ...range('in', c.inputs)],",
+		tests: ["tests/ports.test.ts","tests/regressions.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "a tristate buffer draws its enable lead to the pin",
 		file: "src/symbols/logic.ts",
-		from: "<path ${paint} d=\"M 0 42 V 12\" />",
-		to: "<path ${paint} d=\"M 0 24 V 12\" />",
+		from: "P(p, 'M 0 42 V 12')",
+		to: "P(p, 'M 0 24 V 12')",
 		tests: ["tests/ports.test.ts"]
 	},
 	{
 		name: "a splitter's tap is its first output",
 		file: "src/symbols/logic.ts",
-		from: "if (component.kind === 'bus' && name === 'tap') return ports.find((entry) => entry.id === right[0]);",
-		to: "if (component.kind === 'bus' && name === 'tap') return undefined;",
-		tests: ["tests/ports.test.ts", "tests/regressions.test.ts", "tests/parser.test.ts"]
+		from: "if (c.kind === 'bus' && name === 'tap') return pts.find((e) => e.id === right[0]);",
+		to: "if (c.kind === 'bus' && name === 'tap') return undefined;",
+		tests: ["tests/ports.test.ts","tests/regressions.test.ts","tests/parser.test.ts"]
 	},
 	{
 		name: "text that fits is never compressed",
 		file: "src/symbols/common.ts",
 		from: "return mathLabelTextWidthAt(value, fontSize) <= maximum ?",
 		to: "return mathLabelTextWidthAt(value, fontSize) < 0 ?",
-		tests: ["tests/renderer.test.ts", "tests/uml.test.ts", "tests/snapshot.test.ts", "tests/math-label.test.ts"]
+		tests: ["tests/renderer.test.ts","tests/uml.test.ts","tests/snapshot.test.ts","tests/math-label.test.ts"]
 	},
 	{
 		name: "bold text is measured wider",
 		file: "src/math-label.ts",
 		from: "const BOLD_FACTOR = 1.043;",
 		to: "const BOLD_FACTOR = 1;",
-		tests: ["tests/math-label.test.ts", "tests/uml.test.ts", "tests/renderer.test.ts"]
+		tests: ["tests/math-label.test.ts","tests/uml.test.ts","tests/renderer.test.ts"]
 	},
 	{
 		name: "a parsed label is frozen before it is shared",
 		file: "src/math-label.ts",
-		from: "const segments = Object.freeze(parse(value).map((segment) => Object.freeze(segment)));",
-		to: "const segments = parse(value);",
+		from: "const frozen = Object.freeze(segments.map((s) => Object.freeze(s)));",
+		to: "const frozen = segments;",
 		tests: ["tests/math-label.test.ts"]
 	},
 	{
@@ -641,75 +641,75 @@ const mutants = [
 		file: "src/placement.ts",
 		from: "\tfor (const id of [...failed]) abandon(id);\n",
 		to: "",
-		tests: ["tests/placement.test.ts", "tests/diagnose.test.ts", "tests/parser.test.ts", "tests/regressions.test.ts"]
+		tests: ["tests/placement.test.ts","tests/diagnose.test.ts","tests/parser.test.ts","tests/regressions.test.ts"]
 	},
 	{
 		name: "a cycle is reported once, not once per member",
 		file: "src/placement.ts",
-		from: "\t\tfor (const member of cycle) abandon(member);\n",
+		from: "\t\tfor (const m of cycle) abandon(m);\n",
 		to: "",
-		tests: ["tests/placement.test.ts", "tests/diagnose.test.ts", "tests/parser.test.ts"]
+		tests: ["tests/placement.test.ts","tests/diagnose.test.ts","tests/parser.test.ts"]
 	},
 	{
 		name: "left-of mirrors right-of exactly",
 		file: "src/placement.ts",
-		from: "return { x: reference.minX - gap - selfAtOrigin.maxX, y: position.y };",
-		to: "return { x: reference.minX - gap - selfAtOrigin.maxX + 1, y: position.y };",
+		from: "else if (rel.kind === 'left-of') x = rg.minX - gap - atOrigin.maxX;",
+		to: "else if (rel.kind === 'left-of') x = rg.minX - gap - atOrigin.maxX + 1;",
 		tests: ["tests/placement.test.ts"]
 	},
 	{
 		name: "a junction has no lead: its wires leave the node itself",
 		file: "src/layout.ts",
-		from: "\t\tif (component.kind === 'junction') return { owner: owners.get(componentId)!, point: placed.point, escape: placed.point };\n",
+		from: "\t\tif (comp.kind === 'junction') {\n\t\t\tconst res = { placed, term: { owner, point: placed.point, escape: placed.point } };\n\t\t\ttermCache.set(key, res);\n\t\t\treturn res;\n\t\t}\n",
 		to: "",
-		tests: ["tests/regressions.test.ts", "tests/trunk.test.ts", "tests/layout.test.ts"]
+		tests: ["tests/regressions.test.ts","tests/trunk.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "a junction's body never stands in its own wires' way",
 		file: "src/layout.ts",
-		from: "kind: component.kind === 'junction' ? 'node' : 'body', rect: body }",
+		from: "kind: c.kind === 'junction' ? 'node' : 'body', rect: body }",
 		to: "kind: 'body', rect: body }",
-		tests: ["tests/regressions.test.ts", "tests/trunk.test.ts", "tests/layout.test.ts"]
+		tests: ["tests/regressions.test.ts","tests/trunk.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "a wire written to a junction part is drawn to it",
 		file: "src/layout.ts",
-		from: "\t\t\tmeetTo: components.get(connection.to.componentId)!.kind === 'junction',",
+		from: "\t\t\tmeetTo: components.get(c.to.componentId)!.kind === 'junction',",
 		to: "\t\t\tmeetTo: false,",
-		tests: ["tests/regressions.test.ts", "tests/trunk.test.ts", "tests/layout.test.ts"]
+		tests: ["tests/regressions.test.ts","tests/trunk.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "a junction's text sits beside its dot",
 		file: "src/layout.ts",
 		from: "\tif (component.kind === 'junction') {\n\t\treturn {",
 		to: "\tif (component.kind === 'nothing') {\n\t\treturn {",
-		tests: ["tests/regressions.test.ts", "tests/trunk.test.ts", "tests/layout.test.ts"]
+		tests: ["tests/regressions.test.ts","tests/trunk.test.ts","tests/layout.test.ts"]
 	},
 	{
 		name: "text set beside a part starts at its anchor",
 		file: "src/renderer.ts",
-		from: "\tconst textStart = anchors.textX === undefined ? '' : ' style=\"text-anchor:start\"';",
-		to: "\tconst textStart = '';",
+		from: "\t\t\tconst ts = isJunc ? ' style=\"text-anchor:start\"' : '';",
+		to: "\t\t\tconst ts = '';",
 		tests: ["tests/regressions.test.ts"]
 	},
 	{
 		name: "a part's extent covers text set beside it",
 		file: "src/layout.ts",
-		from: "\t\t\trect.maxX = Math.max(rect.maxX, text.maxX);\n",
+		from: "\t\t\t\tmaxX = Math.max(maxX, t.maxX);\n",
 		to: "",
-		tests: ["tests/regressions.test.ts", "tests/layout.test.ts", "tests/topology.test.ts", "tests/parser.test.ts"]
+		tests: ["tests/regressions.test.ts","tests/layout.test.ts","tests/topology.test.ts","tests/parser.test.ts"]
 	},
 	{
 		name: "a junction's dot keeps out every other net",
 		file: "src/route.ts",
-		from: "\t\t\t\tif (!own.has(obstacle.owner)) block(obstacle.rect);",
-		to: "\t\t\t\tif (false) block(obstacle.rect);",
+		from: "\t\t\t\tif (!own.has(ob.owner)) block(ob.rect);",
+		to: "\t\t\t\tif (false) block(ob.rect);",
 		tests: ["tests/regressions.test.ts"]
 	},
 	{
 		name: "a ket closes with an angle bracket, not the command's text",
 		file: "src/math-label.ts",
-		from: "\trangle: '\u27e9',\n",
+		from: "rangle: '⟩',",
 		to: "",
 		tests: ["tests/math-label.test.ts"]
 	},
@@ -722,23 +722,23 @@ const mutants = [
 	},
 	{
 		name: "placement measures from a junction's centred rows",
-		file: "src/layout.ts",
-		from: "\treturn rectUnits(componentExtent(component, true));",
-		to: "\treturn rectUnits(componentExtent(component, false));",
-		tests: ["tests/regressions.test.ts", "tests/placement.test.ts"]
+		file: "src/placement.ts",
+		from: "componentExtent(c, true)",
+		to: "componentExtent(c, false)",
+		tests: ["tests/regressions.test.ts","tests/placement.test.ts"]
 	},
 	{
 		name: "a reference to a declaration that already failed is not reported as undeclared",
 		file: "src/placement.ts",
-		from: "\t\t\tif (reference === undefined && failedDeclarations?.has(relation.ref) === true) {",
+		from: "\t\t\tif (ref === undefined && failedDeclarations?.has(rel.ref) === true) {",
 		to: "\t\t\tif (false) {",
 		tests: ["tests/diagnose.test.ts"]
 	},
 	{
 		name: "connections are still checked after a placement fails",
 		file: "src/parser.ts",
-		from: "\t\tplacements = resolvePlacements(components, settled, limits.placementDepth, (error) => reporter.report(error), poisoned);\n\t\tcheckPlaced(settled);",
-		to: "\t\tplacements = resolvePlacements(components, settled, limits.placementDepth, (error) => reporter.report(error), poisoned);\n\t\tif (reporter.failed) return undefined;\n\t\tcheckPlaced(settled);",
+		from: "\tconst valid: SchematicConnection[] = [];\n\tfor (let ci = 0; ci < connections.length; ci += 1) {",
+		to: "\tconst valid: SchematicConnection[] = [];\n\tif (reporter.failed) return undefined;\n\tfor (let ci = 0; ci < connections.length; ci += 1) {",
 		tests: ["tests/diagnose.test.ts"]
 	},
 	{
@@ -765,8 +765,8 @@ const mutants = [
 	{
 		name: "a measured sheet holds its wire labels",
 		file: "src/layout.ts",
-		from: "\t\tif (label !== undefined) note(label.minX, label.minY, label.maxX, label.maxY);",
-		to: "\t\tvoid label;",
+		from: "\t\tif (cn.label !== undefined) {\n\t\t\tconst mid = connectionLabelPoint(route);\n\t\t\tconst lb = labelRectAt(cn, { x: toMilli(mid.x), y: toMilli(mid.y) })!;\n\t\t\tnote(lb.minX, lb.minY, lb.maxX, lb.maxY);\n\t\t}",
+		to: "\t\tvoid cn;",
 		tests: ["tests/auto-canvas.test.ts"]
 	},
 	{
@@ -786,15 +786,15 @@ const mutants = [
 	{
 		name: "a declaration with no position is a head and then a colour or an option block",
 		file: "src/syntax.ts",
-		from: "clause.relations.length === 0 && UNPLACED_TAIL.test(head[4]!) && !PLACEMENT_WORD.test(head[4]!)",
-		to: "clause.relations.length === 0 && !PLACEMENT_WORD.test(head[4]!)",
+		from: "relations.length === 0 && UNPLACED_TAIL.test(head[4]!) && !PLACEMENT_WORD.test(head[4]!)",
+		to: "relations.length === 0 && !PLACEMENT_WORD.test(head[4]!)",
 		tests: ["tests/draft.test.ts", "tests/placement.test.ts"]
 	},
 	{
 		name: "a placement word alone is not a colour",
 		file: "src/syntax.ts",
-		from: "clause.relations.length === 0 && UNPLACED_TAIL.test(head[4]!) && !PLACEMENT_WORD.test(head[4]!)",
-		to: "clause.relations.length === 0 && UNPLACED_TAIL.test(head[4]!)",
+		from: "relations.length === 0 && UNPLACED_TAIL.test(head[4]!) && !PLACEMENT_WORD.test(head[4]!)",
+		to: "relations.length === 0 && UNPLACED_TAIL.test(head[4]!)",
 		tests: ["tests/draft.test.ts"]
 	},
 	{
@@ -835,7 +835,7 @@ const mutants = [
 	{
 		name: "a relation that reaches a drafted part waits for the draft",
 		file: "src/parser.ts",
-		from: "if (late.has(entry.component.id) || !entry.relations.some((relation) => late.has(relation.ref))) continue;",
+		from: "if (late.has(e.component.id) || !e.relations.some((r) => late.has(r.ref))) continue;",
 		to: "if (true) continue;",
 		tests: ["tests/draft.test.ts"]
 	},
@@ -856,99 +856,99 @@ const mutants = [
 	{
 		name: "a fitted gate never reads a part still to fit",
 		file: "src/fit.ts",
-		from: "far.componentId === component.id || pending.has(far.componentId)) continue;",
-		to: "far.componentId === component.id) continue;",
+		from: "far.componentId === c.id || pending.has(far.componentId)) continue;",
+		to: "far.componentId === c.id) continue;",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "a pin wired only to its own part is not lined up with itself",
 		file: "src/fit.ts",
-		from: "if (near === undefined || far.componentId === component.id || pending.has",
-		to: "if (near === undefined || pending.has",
+		from: "if (far === undefined || far.componentId === c.id || pending.has",
+		to: "if (far === undefined || pending.has",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "the nearest partner decides",
 		file: "src/fit.ts",
-		from: "\t\t\tcandidate.dx < best.dx ||",
-		to: "\t\t\tcandidate.dx > best.dx ||",
+		from: "if (dx < bestDx ||",
+		to: "if (dx > bestDx ||",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "equally near partners go to the higher one",
 		file: "src/fit.ts",
-		from: "(candidate.y < best.y ||",
-		to: "(candidate.y > best.y ||",
+		from: "(pt.y < bestY ||",
+		to: "(pt.y > bestY ||",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "a rail prefers its input's wire to its output's",
 		file: "src/fit.ts",
-		from: "arrival(component, input.id, connections, byId, pending) ?? arrival(component, outputs[index]!.id, connections, byId, pending)",
-		to: "arrival(component, outputs[index]!.id, connections, byId, pending) ?? arrival(component, input.id, connections, byId, pending)",
+		from: "arrival(c, p.id, connections, byId, pending) ?? arrival(c, outs[i]!.id, connections, byId, pending)",
+		to: "arrival(c, outs[i]!.id, connections, byId, pending) ?? arrival(c, p.id, connections, byId, pending)",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "unwired terminals before the first wired one extend upward",
 		file: "src/fit.ts",
-		from: "if (index < first) return known[first]! - (first - index) * pitch;",
-		to: "if (index < first) return known[first]! + (first - index) * pitch;",
+		from: "if (i < first) return known[first]! - (first - i) * pitch;",
+		to: "if (i < first) return known[first]! + (first - i) * pitch;",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "rails the least gap apart are accepted",
 		file: "src/fit.ts",
-		from: "if (lower.value - upper.value < FIT_GAP * 1000) {",
-		to: "if (lower.value - upper.value <= FIT_GAP * 1000) {",
+		from: "if (lv - uv < FIT_GAP * 1000) {",
+		to: "if (lv - uv <= FIT_GAP * 1000) {",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "pins the least gap apart are accepted",
 		file: "src/fit.ts",
-		from: "if (lower - upper >= FIT_GAP * 1000) continue;",
-		to: "if (lower - upper > FIT_GAP * 1000) continue;",
+		from: "if (lo - up >= FIT_GAP * 1000) continue;",
+		to: "if (lo - up > FIT_GAP * 1000) continue;",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "a fitted part is centred between its wires",
 		file: "src/fit.ts",
-		from: "\tconst centre = roundDiv(order[0]!.value + order.at(-1)!.value, 2);",
-		to: "\tconst centre = order[0]!.value;",
+		from: "\tconst centre = roundDiv(order[0]![0] + order.at(-1)![0], 2);",
+		to: "\tconst centre = order[0]![0];",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "a fitted body never shrinks below its usual height",
 		file: "src/fit.ts",
-		from: "const height = Math.max(component.bodyHeight * 1000, 2 * (reach + pitch));",
+		from: "const height = Math.max(c.bodyHeight * 1000, 2 * (reach + pitch));",
 		to: "const height = 2 * (reach + pitch);",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "an alignment at a terminal lines that terminal up",
 		file: "src/placement.ts",
-		from: "return { x: position.x, y: reference.originY - (relation.at === undefined ? 0 : terminalAtOrigin(relation.at).y) };",
-		to: "return { x: position.x, y: reference.originY };",
+		from: "else y = rg.originY - (rel.at === undefined ? 0 : resolvePlaced(originComp, rel.at)!.point.y);",
+		to: "else y = rg.originY;",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "fitted gates with different rails never share one drawing",
 		file: "src/symbols/quantum.ts",
-		from: "symbol: (component) => (component.rails === undefined ? 'cnot' : `cnot-${component.rails.join('_')}`)",
+		from: "symbol: (c) => (c.rails === undefined ? 'cnot' : `cnot-${c.rails.join('_')}`)",
 		to: "symbol: () => 'cnot'",
 		tests: ["tests/fit.test.ts"]
 	},
 	{
 		name: "a junction end partway along copper is a node of the copper graph",
 		file: "src/route.ts",
-		from: "\t\tfor (const point of ends) points.set(pointKey(point), point);",
+		from: "\t\tfor (const p of ends) pts.set(pointKey(p), p);",
 		to: "\t\tvoid ends;",
 		tests: ["tests/regressions.test.ts"]
 	},
 	{
 		name: "an absolute declaration may leave its label out",
 		file: "src/syntax.ts",
-		from: "const COMPONENT = new RegExp(`^(${ID}):(${ID})(?:\\\\s+\"([^\"]+)\")?",
-		to: "const COMPONENT = new RegExp(`^(${ID}):(${ID})\\\\s+\"([^\"]+)\"",
+		from: "const COMP_SRC = `^(${ID}):(${ID})(?:\\\\s+\"([^\"]+)\")?",
+		to: "const COMP_SRC = `^(${ID}):(${ID})\\\\s+\"([^\"]+)\"",
 		tests: ["tests/labels.test.ts"]
 	},
 	{
@@ -968,22 +968,22 @@ const mutants = [
 	{
 		name: "a part without a label draws no label row",
 		file: "src/renderer.ts",
-		from: "${textStart}>${id}</text>${component.label === '' ? '' :",
-		to: "${textStart}>${id}</text>${false ? '' :",
+		from: "${ts}>${id}</text>${c.label === '' ? '' :",
+		to: "${ts}>${id}</text>${false ? '' :",
 		tests: ["tests/labels.test.ts"]
 	},
 	{
 		name: "a part without a label leaves it out of its accessible name",
 		file: "src/renderer.ts",
-		from: "${component.kind}${component.label === '' ? '' : `, ${mathLabelText(component.label)}`}",
-		to: "${component.kind}${`, ${mathLabelText(component.label)}`}",
+		from: "${c.kind}${c.label === '' ? '' : `, ${mathLabelText(c.label)}`}",
+		to: "${c.kind}${`, ${mathLabelText(c.label)}`}",
 		tests: ["tests/labels.test.ts"]
 	},
 	{
 		name: "wires need not keep clear of a label row that is not drawn",
 		file: "src/layout.ts",
-		from: "return component.label === '' ? [designator] :",
-		to: "return false ? [designator] :",
+		from: "return component.label === '' ? [d] :",
+		to: "return false ? [d] :",
 		tests: ["tests/labels.test.ts"]
 	},
 	{
@@ -1031,15 +1031,15 @@ const mutants = [
 	{
 		name: "ports are asked of the parser with the options given",
 		file: "src/schema.ts",
-		from: "new Map(Object.entries(options)), 1);",
-		to: "new Map(), 1);",
+		from: "const raw = options[opt.name];",
+		to: "const raw = undefined;",
 		tests: ["tests/schema.test.ts"]
 	},
 	{
 		name: "a ports error carries no line, since there is no document",
 		file: "src/schema.ts",
-		from: "failure.message.replace(/^Line 1: /, '')",
-		to: "failure.message",
+		from: "if (!byName.has(key)) throw new SchematicSyntaxError(`Option ${key} is not supported.`);",
+		to: "if (!byName.has(key)) throw new SchematicSyntaxError(`Option ${key} is not supported.`, 1);",
 		tests: ["tests/schema.test.ts"]
 	}
 ];

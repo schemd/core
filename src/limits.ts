@@ -199,30 +199,18 @@ export const SCHEMATIC_LIMITS = Object.freeze({
  *   not a positive integer or `Infinity`.
  */
 export function resolveSchematicLimits(value: unknown): SchematicResolvedLimits {
-	if (value === undefined) return LIMIT_DEFAULTS;
-	if (typeof value !== 'object' || value === null) {
-		throw new SchematicSyntaxError('Compiler limits must be an object.');
-	}
+	if (value === undefined || value === LIMIT_DEFAULTS) return LIMIT_DEFAULTS;
+	if (typeof value !== 'object' || value === null) throw new SchematicSyntaxError('Compiler limits must be an object.');
 	const supplied = value as Record<string, unknown>;
 	for (const name of Object.keys(supplied)) {
-		/* A budget is a safety control, so a misspelled field must fail loudly
-		   rather than leave a host believing it set a ceiling it did not. */
-		if (!CONFIGURABLE_LIMITS.includes(name)) {
-			throw new SchematicSyntaxError(`Unknown compiler limit ${name}.`);
-		}
+		if (!CONFIGURABLE_LIMITS.includes(name)) throw new SchematicSyntaxError(`Unknown compiler limit ${name}.`);
 	}
 	const resolved = { ...LIMIT_DEFAULTS } as Record<string, number> & SchematicResolvedLimits;
 	for (const name of CONFIGURABLE_LIMITS) {
 		const limit = supplied[name];
 		if (limit === undefined) continue;
-		if (
-			typeof limit !== 'number' ||
-			limit < 1 ||
-			!(Number.isInteger(limit) || limit === Number.POSITIVE_INFINITY)
-		) {
-			throw new SchematicSyntaxError(
-				`Compiler limit ${name} must be a positive integer or Infinity.`
-			);
+		if (typeof limit !== 'number' || limit < 1 || !(Number.isInteger(limit) || limit === Infinity)) {
+			throw new SchematicSyntaxError(`Compiler limit ${name} must be a positive integer or Infinity.`);
 		}
 		resolved[name] = limit;
 	}

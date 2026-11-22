@@ -1,6 +1,6 @@
 {
   "name": "@schemd/core",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Zero-dependency text-to-SVG compiler for schematics and UML.",
   "homepage": "https://schemd.johnowolabiidogun.dev",
   "bugs": {
@@ -80,7 +80,7 @@
     }
   },
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.build.json && tsc -p tsconfig.types.json",
+    "build": "node scripts/build.mjs",
     "benchmark": "bun run build && node scripts/benchmark.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "prepack": "bun run build",

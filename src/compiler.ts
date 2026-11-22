@@ -52,11 +52,6 @@ export interface SchematicSourceMap {
 export interface SchematicCompilation {
 	readonly document: SchematicDocument;
 	readonly svg: string;
-	/**
-	 * The sheet the drawing occupies. For declared bounds this is `0, 0` and the
-	 * declared size; with no bounds, or `'auto'`, it is the sheet the compiler measured,
-	 * which is what a host needs to reserve space for the figure.
-	 */
 	readonly sheet: SchematicSheet;
 	readonly metrics: SchematicCompilationMetrics;
 	readonly sourceMap: SchematicSourceMap;
@@ -88,20 +83,15 @@ export interface SchematicCompilation {
  */
 export function schematicSourceMap(document: SchematicDocument): SchematicSourceMap {
 	assertParsedSchematicDocument(document);
-	const nodes: SchematicNodeSource[] = [];
-	for (const component of document.components) {
-		nodes.push({ id: component.id, line: component.line });
-	}
-	const wires: SchematicWireSource[] = [];
-	for (const connection of document.connections) {
-		wires.push({
-			source: `${connection.from.componentId}.${connection.from.port}`,
-			target: `${connection.to.componentId}.${connection.to.port}`,
-			line: connection.line,
-			...(connection.netId === undefined ? {} : { netId: connection.netId })
-		});
-	}
-	return { nodes, wires };
+	return {
+		nodes: document.components.map((c) => ({ id: c.id, line: c.line })),
+		wires: document.connections.map((c) => ({
+			source: `${c.from.componentId}.${c.from.port}`,
+			target: `${c.to.componentId}.${c.to.port}`,
+			line: c.line,
+			...(c.netId === undefined ? {} : { netId: c.netId })
+		}))
+	};
 }
 
 /** Parse and render a schematic with one stable public call. */

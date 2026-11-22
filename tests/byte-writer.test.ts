@@ -178,6 +178,14 @@ describe('buffer growth', () => {
 		expect(writer.finish()).toBe(expected);
 		expect(writer.byteLength).toBe(encodedLength(expected));
 	});
+
+	test('preserves surrogate pairs straddling an internal slice boundary and mixed ASCII/UTF-8 slices', () => {
+		const writer = new BoundedSvgWriter(1 << 20);
+		const chunk = `${'a'.repeat(21_844)}😀${'b'.repeat(25_000)}€${'c'.repeat(25_000)}`;
+		writer.append(chunk);
+		expect(writer.finish()).toBe(chunk);
+		expect(writer.byteLength).toBe(encodedLength(chunk));
+	});
 });
 
 describe('empty input', () => {

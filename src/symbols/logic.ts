@@ -1,8 +1,3 @@
-/**
- * Logic symbols: IEEE and IEC gates, and configurable digital blocks.
- *
- * @module
- */
 import { toMilli } from '../geom.js';
 import {
 	ADDER_TYPES,
@@ -15,94 +10,45 @@ import {
 	type ClassicalGateComponent,
 	type DigitalComponent
 } from '../types.js';
-import {
-	colorAttributes,
-	count,
-	distributed,
-	enumOption,
-	fit,
-	indexed,
-	n,
-	only,
-	orientation,
-	TEXT_PAINT,
-	u,
-	width,
-	type KindDef,
-	type LocalPort
-} from './common.js';
+import { C, colorAttributes, count, distributed, enumOption, fit, indexed, n, only, orientation, P, R, T, u, width, type KindDef, type LocalPort } from './common.js';
 
-/** Gate height in diagram units: 16 per terminal on the busier side, at least 48. */
-export function gateHeight(component: ClassicalGateComponent): number {
-	return Math.max(48, Math.max(component.inputs, component.outputs) * 16);
-}
+export const gateHeight = (c: ClassicalGateComponent): number => Math.max(48, Math.max(c.inputs, c.outputs) * 16);
 
-function gatePort(component: ClassicalGateComponent, output: boolean, index: number): LocalPort {
-	const total = output ? component.outputs : component.inputs;
-	return {
-		id: `${output ? 'out' : 'in'}${index + 1}`,
-		x: output ? 48_000 : -48_000,
-		y: distributed(index, total, gateHeight(component) * 1000),
-		nx: output ? 1 : -1,
-		ny: 0
-	};
-}
+const gatePort = (c: ClassicalGateComponent, output: boolean, index: number): LocalPort => ({
+	id: `${output ? 'out' : 'in'}${index + 1}`,
+	x: output ? 48_000 : -48_000,
+	y: distributed(index, output ? c.outputs : c.inputs, gateHeight(c) * 1000),
+	nx: output ? 1 : -1,
+	ny: 0
+});
 
 const OR_FAMILY = new Set(['or', 'nor', 'xor', 'xnor']);
 const INVERTING = new Set(['nand', 'nor', 'xnor', 'not']);
-
-/** Where a terminal stub meets the gate contour, in diagram units. */
-function boundary(component: ClassicalGateComponent, output: boolean, y: number): number {
-	if (component.standard === 'iec') return output ? 32 : -32;
-	const half = gateHeight(component) / 2;
-	if (!output) {
-		if (OR_FAMILY.has(component.kind)) {
-			const progress = (1 - y / half) / 2;
-			return (component.kind === 'xor' || component.kind === 'xnor' ? -38 : -32) + 40 * progress * (1 - progress);
-		}
-		return component.kind === 'not' ? -30 : -32;
-	}
-	if (component.kind === 'and' || component.kind === 'nand') {
-		const normalized = y / half;
-		return 32 * Math.sqrt(Math.max(0, 1 - normalized * normalized));
-	}
-	if (OR_FAMILY.has(component.kind)) {
-		const progress = Math.sqrt(Math.max(0, 1 - Math.abs(y) / half));
-		const inverse = 1 - progress;
-		return -32 * inverse * inverse + 6 * inverse * progress + 32 * progress * progress;
-	}
-	return 30 - 60 * (Math.abs(y) / half);
-}
-
-function gateStubs(component: ClassicalGateComponent, paint: string): string {
-	const h = gateHeight(component) * 1000;
-	let out = '';
-	for (let index = 0; index < component.inputs; index += 1) {
-		const y = distributed(index, component.inputs, h);
-		out += `<path ${paint} d="M -48 ${n(y)} H ${u(boundary(component, false, y / 1000))}" />`;
-	}
-	for (let index = 0; index < component.outputs; index += 1) {
-		const y = distributed(index, component.outputs, h);
-		const start = boundary(component, true, y / 1000) + (INVERTING.has(component.kind) ? 8 : 0);
-		out += `<path ${paint} d="M ${u(start)} ${n(y)} H 48" />`;
-	}
-	return out;
-}
-
-function bubbles(component: ClassicalGateComponent, paint: string): string {
-	if (!INVERTING.has(component.kind)) return '';
-	const h = gateHeight(component) * 1000;
-	let out = '';
-	for (let index = 0; index < component.outputs; index += 1) {
-		const y = distributed(index, component.outputs, h);
-		out += `<circle ${paint} cx="${u(boundary(component, true, y / 1000) + 4)}" cy="${n(y)}" r="4" />`;
-	}
-	return out;
-}
-
 const IEC_SYMBOLS: Readonly<Record<ClassicalGateComponent['kind'], string>> = {
 	and: '&amp;', nand: '&amp;', or: '≥1', nor: '≥1', xor: '=1', xnor: '=1', not: '1'
 };
+
+function boundary(c: ClassicalGateComponent, output: boolean, y: number): number {
+	if (c.standard === 'iec') return output ? 32 : -32;
+	const half = gateHeight(c) / 2;
+	if (!output) {
+		if (OR_FAMILY.has(c.kind)) {
+			const p = (1 - y / half) / 2;
+			return (c.kind === 'xor' || c.kind === 'xnor' ? -38 : -32) + 40 * p * (1 - p);
+		}
+		return c.kind === 'not' ? -30 : -32;
+	}
+	if (c.kind === 'and' || c.kind === 'nand') {
+		const norm = y / half;
+		return 32 * Math.sqrt(Math.max(0, 1 - norm * norm));
+	}
+	if (OR_FAMILY.has(c.kind)) {
+		const p = Math.sqrt(Math.max(0, 1 - Math.abs(y) / half));
+		const q = 1 - p;
+		return -32 * q * q + 6 * q * p + 32 * p * p;
+	}
+	return 30 - 60 * (Math.abs(y) / half);
+}
 
 const gate: KindDef<ClassicalGateComponent> = {
 	parse(kind, common, options, line) {
@@ -118,226 +64,197 @@ const gate: KindDef<ClassicalGateComponent> = {
 			...orientation(options, line)
 		};
 	},
-	extents: (component) => [48_000, gateHeight(component) * 500],
-	ports(component) {
-		const ports: LocalPort[] = [];
-		for (let index = 0; index < component.inputs; index += 1) ports.push(gatePort(component, false, index));
-		for (let index = 0; index < component.outputs; index += 1) ports.push(gatePort(component, true, index));
-		return ports;
+	extents: (c) => [48_000, gateHeight(c) * 500],
+	ports(c) {
+		const pts: LocalPort[] = [];
+		for (let i = 0; i < c.inputs; i += 1) pts.push(gatePort(c, false, i));
+		for (let i = 0; i < c.outputs; i += 1) pts.push(gatePort(c, true, i));
+		return pts;
 	},
-	resolve(component, name) {
-		const terminal = indexed(name, component.inputs, component.outputs);
-		return terminal === undefined ? undefined : gatePort(component, terminal.output, terminal.index);
+	resolve(c, name) {
+		const t = indexed(name, c.inputs, c.outputs);
+		return t === undefined ? undefined : gatePort(c, t.output, t.index);
 	},
-	draw(component, paint) {
-		const height = gateHeight(component);
-		const top = -height / 2;
-		const bottom = height / 2;
-		if (component.standard === 'iec') {
-			return `<rect ${paint} x="-32" y="${top}" width="64" height="${height}" rx="2" /><text class="schematic-gate-symbol" ${TEXT_PAINT} x="0" y="4" text-anchor="middle" font-size="14">${IEC_SYMBOLS[component.kind]}</text>${bubbles(component, paint)}${gateStubs(component, paint)}`;
+	draw(c, p) {
+		const h = gateHeight(c);
+		const hm = h * 1000;
+		const top = -h / 2;
+		const bot = h / 2;
+		const inv = INVERTING.has(c.kind);
+		let out =
+			c.standard === 'iec'
+				? R(p, -32, top, 64, h, 2) + T('schematic-gate-symbol', 0, 4, 14, IEC_SYMBOLS[c.kind], ' text-anchor="middle"')
+				: c.kind === 'not'
+					? P(p, `M -30 ${top} L 30 0 L -30 ${bot} Z`)
+					: c.kind === 'and' || c.kind === 'nand'
+						? P(p, `M -32 ${top} H 0 A 32 ${bot} 0 0 1 0 ${bot} H -32 Z`)
+						: P(p, `M -32 ${top} Q 3 ${top} 32 0 Q 3 ${bot} -32 ${bot} Q -12 0 -32 ${top} Z`) +
+							(c.kind === 'xor' || c.kind === 'xnor' ? P(p, `M -38 ${top} Q -18 0 -38 ${bot}`) : '');
+		if (inv) {
+			for (let i = 0; i < c.outputs; i += 1) {
+				const y = distributed(i, c.outputs, hm);
+				out += C(p, u(boundary(c, true, y / 1000) + 4), n(y), 4);
+			}
 		}
-		let contour: string;
-		if (component.kind === 'not') contour = `<path ${paint} d="M -30 ${top} L 30 0 L -30 ${bottom} Z" />`;
-		else if (component.kind === 'and' || component.kind === 'nand') contour = `<path ${paint} d="M -32 ${top} H 0 A 32 ${bottom} 0 0 1 0 ${bottom} H -32 Z" />`;
-		else {
-			const xorArc = component.kind === 'xor' || component.kind === 'xnor' ? `<path ${paint} d="M -38 ${top} Q -18 0 -38 ${bottom}" />` : '';
-			contour = `<path ${paint} d="M -32 ${top} Q 3 ${top} 32 0 Q 3 ${bottom} -32 ${bottom} Q -12 0 -32 ${top} Z" />${xorArc}`;
+		for (let i = 0; i < c.inputs; i += 1) {
+			const y = distributed(i, c.inputs, hm);
+			out += P(p, `M -48 ${n(y)} H ${u(boundary(c, false, y / 1000))}`);
 		}
-		return `${contour}${bubbles(component, paint)}${gateStubs(component, paint)}`;
+		for (let i = 0; i < c.outputs; i += 1) {
+			const y = distributed(i, c.outputs, hm);
+			out += P(p, `M ${u(boundary(c, true, y / 1000) + (inv ? 8 : 0))} ${n(y)} H 48`);
+		}
+		return out;
 	}
 };
-
-/* ---- digital blocks ---- */
 
 const DIGITAL_DEFAULTS: Readonly<Record<DigitalComponent['kind'], readonly [number, number]>> = {
 	buffer: [1, 1], logic: [0, 1], clock: [0, 1], flipflop: [3, 2], mux: [2, 1],
 	encoder: [4, 2], decoder: [2, 4], register: [3, 2], counter: [3, 2], adder: [2, 2],
 	comparator: [2, 3], bus: [1, 2]
 };
-
 const DIGITAL_VARIANTS: Readonly<Partial<Record<DigitalComponent['kind'], readonly [string, readonly string[]]>>> = {
-	buffer: ['plain', BUFFER_TYPES],
-	logic: ['low', LOGIC_STATES],
-	flipflop: ['d', FLIPFLOP_TYPES],
-	mux: ['mux', MUX_TYPES],
-	adder: ['half', ADDER_TYPES],
-	bus: ['splitter', BUS_TYPES]
+	buffer: ['plain', BUFFER_TYPES], logic: ['low', LOGIC_STATES], flipflop: ['d', FLIPFLOP_TYPES],
+	mux: ['mux', MUX_TYPES], adder: ['half', ADDER_TYPES], bus: ['splitter', BUS_TYPES]
 };
+const DIGITAL_LABELS: Readonly<Partial<Record<DigitalComponent['kind'], string>>> = {
+	clock: 'CLK', encoder: 'ENC', decoder: 'DEC', register: 'REG', counter: 'CTR', comparator: 'CMP'
+};
+const LOGIC_TEXT: Readonly<Record<string, string>> = { high: '1', low: '0', 'high-z': 'Z', unknown: 'X' };
 
-/**
- * Each side's terminals in drawing order: data inputs on the left, outputs on
- * the right, clock, enable and select below, preset and clear above. Every
- * terminal has its own slot, so no two distinct signals share a point.
- */
-interface DigitalSides {
-	readonly left: readonly string[];
-	readonly right: readonly string[];
-	readonly bottom: readonly string[];
-	readonly top: readonly string[];
-}
+const range = (prefix: string, total: number) => Array.from({ length: total }, (_, i) => `${prefix}${i + 1}`);
 
-function digitalSides(component: DigitalComponent): DigitalSides {
-	const range = (prefix: string, total: number) => Array.from({ length: total }, (_, index) => `${prefix}${index + 1}`);
-	switch (component.kind) {
+function digitalSides(c: DigitalComponent) {
+	switch (c.kind) {
 		case 'logic':
-		case 'clock':
-			return { left: [], right: ['out'], bottom: [], top: [] };
+		case 'clock': return { left: [] as string[], right: ['out'], bottom: [] as string[], top: [] as string[] };
 		case 'flipflop': {
-			const variant = component.variant;
+			const v = c.variant;
 			return {
-				left: variant === 'jk' ? ['j', 'k'] : variant === 't' ? ['t'] : variant === 'sr-latch' ? ['s', 'r'] : ['d'],
+				left: v === 'jk' ? ['j', 'k'] : v === 't' ? ['t'] : v === 'sr-latch' ? ['s', 'r'] : ['d'],
 				right: ['q', 'nq'],
-				bottom: variant === 'sr-latch' ? ['enable'] : ['clock'],
-				top: variant === 'd' || variant === 't' ? ['preset', 'clear'] : ['preset']
+				bottom: v === 'sr-latch' ? ['enable'] : ['clock'],
+				top: v === 'd' || v === 't' ? ['preset', 'clear'] : ['preset']
 			};
 		}
 		case 'register':
-			/* A register's first data terminals are named `in` and `out`; any more
-			   it is given are numbered on from 2. */
-			return {
-				left: ['in', ...range('in', component.inputs).slice(1)],
-				right: ['out', ...range('out', component.outputs).slice(1)],
-				bottom: ['clock', 'enable'],
-				top: ['clear']
-			};
-		case 'comparator':
-			return { left: ['in1', 'in2'], right: ['gt', 'eq', 'lt'], bottom: [], top: [] };
+			return { left: ['in', ...range('in', c.inputs).slice(1)], right: ['out', ...range('out', c.outputs).slice(1)], bottom: ['clock', 'enable'], top: ['clear'] };
+		case 'comparator': return { left: ['in1', 'in2'], right: ['gt', 'eq', 'lt'], bottom: [] as string[], top: [] as string[] };
 		case 'bus':
-			return component.variant === 'tap'
-				? { left: ['bus'], right: ['tap'], bottom: [], top: [] }
-				: component.variant === 'joiner'
-					? { left: range('in', component.inputs), right: ['bus'], bottom: [], top: [] }
-					: { left: ['bus'], right: range('out', component.outputs), bottom: [], top: [] };
+			return c.variant === 'tap'
+				? { left: ['bus'], right: ['tap'], bottom: [] as string[], top: [] as string[] }
+				: c.variant === 'joiner'
+					? { left: range('in', c.inputs), right: ['bus'], bottom: [] as string[], top: [] as string[] }
+					: { left: ['bus'], right: range('out', c.outputs), bottom: [] as string[], top: [] as string[] };
 		default:
 			return {
-				left: range('in', component.inputs),
-				right: range('out', component.outputs),
-				bottom:
-					component.kind === 'counter'
-						? ['clock', 'enable']
-						: component.kind === 'mux'
-							? ['select', 'enable']
-							: component.kind === 'buffer' && component.variant?.startsWith('tristate') === true
-								? ['enable']
-								: [],
-				top: component.kind === 'counter' ? ['clear'] : []
+				left: range('in', c.inputs),
+				right: range('out', c.outputs),
+				bottom: c.kind === 'counter' ? ['clock', 'enable'] : c.kind === 'mux' ? ['select', 'enable'] : c.kind === 'buffer' && c.variant?.startsWith('tristate') === true ? ['enable'] : [],
+				top: c.kind === 'counter' ? ['clear'] : []
 			};
 	}
 }
 
-/** Every terminal of a block, placed: left, right, bottom, then top. */
-function digitalPorts(component: DigitalComponent): LocalPort[] {
-	const { left, right, bottom, top } = digitalSides(component);
-	const w = component.bodyWidth * 1000;
-	const h = component.bodyHeight * 1000;
-	const across = (names: readonly string[], x: number, nx: number, fitted: readonly number[] | undefined) =>
-		names.map((id, index) => ({ id, x, y: fitted === undefined ? distributed(index, names.length, h) : toMilli(fitted[index]!), nx, ny: 0 }));
+function digitalPorts(c: DigitalComponent): LocalPort[] {
+	const { left, right, bottom, top } = digitalSides(c);
+	const w = c.bodyWidth * 1000;
+	const h = c.bodyHeight * 1000;
+	const across = (names: readonly string[], x: number, nx: number, fitted?: readonly number[]) =>
+		names.map((id, i) => ({ id, x, y: fitted === undefined ? distributed(i, names.length, h) : toMilli(fitted[i]!), nx, ny: 0 }));
 	const along = (names: readonly string[], y: number, ny: number) =>
-		names.map((id, index) => ({ id, x: distributed(index, names.length, w), y, nx: 0, ny }));
-	return [
-		...across(left, -(w / 2 + 16_000), -1, component.rows?.left),
-		...across(right, w / 2 + 16_000, 1, component.rows?.right),
-		...along(bottom, h / 2 + 16_000, 1),
-		...along(top, -(h / 2 + 16_000), -1)
-	];
+		names.map((id, i) => ({ id, x: distributed(i, names.length, w), y, nx: 0, ny }));
+	return [...across(left, -(w / 2 + 16_000), -1, c.rows?.left), ...across(right, w / 2 + 16_000, 1, c.rows?.right), ...along(bottom, h / 2 + 16_000, 1), ...along(top, -(h / 2 + 16_000), -1)];
 }
-
-/** A terminal by name, `in`/`out` and `inN`/`outN` addressing the sides in order. */
-function digitalResolve(component: DigitalComponent, name: string): LocalPort | undefined {
-	const ports = digitalPorts(component);
-	const exact = ports.find((entry) => entry.id === name);
-	if (exact !== undefined) return exact;
-	const { left, right } = digitalSides(component);
-	/* `tap` on a splitter or joiner is the first output, as in 0.x. */
-	if (component.kind === 'bus' && name === 'tap') return ports.find((entry) => entry.id === right[0]);
-	const terminal = indexed(name, left.length, right.length);
-	if (terminal === undefined) return undefined;
-	const id = (terminal.output ? right : left)[terminal.index];
-	return ports.find((entry) => entry.id === id);
-}
-
-const DIGITAL_LABELS: Readonly<Partial<Record<DigitalComponent['kind'], string>>> = {
-	clock: 'CLK', encoder: 'ENC', decoder: 'DEC', register: 'REG', counter: 'CTR', comparator: 'CMP'
-};
 
 const digital: KindDef<DigitalComponent> = {
 	parse(kind, common, options, line) {
-		const typed = kind as DigitalComponent['kind'];
+		const k = kind as DigitalComponent['kind'];
 		only(options, ['type', 'inputs', 'outputs', 'width', 'orientation', 'fit'], line);
-		if (options.has('fit') && (typed === 'buffer' || typed === 'logic' || typed === 'clock')) {
-			throw new SchematicSyntaxError(`Option fit is not supported for ${typed}; it lines up the terminals of a block with several on one side.`, line);
+		const fixed = k === 'buffer' || k === 'logic' || k === 'clock';
+		if (options.has('fit') && fixed) {
+			throw new SchematicSyntaxError(`Option fit is not supported for ${k}; it lines up the terminals of a block with several on one side.`, line);
 		}
-		const [defaultInputs, defaultOutputs] = DIGITAL_DEFAULTS[typed];
-		let inputs = count(options.get('inputs'), defaultInputs === 0 ? 1 : defaultInputs, 'inputs', line);
-		let outputs = count(options.get('outputs'), defaultOutputs, 'outputs', line);
-		if ((typed === 'logic' || typed === 'clock') && options.has('inputs')) throw new SchematicSyntaxError(`${typed} does not accept inputs.`, line);
-		const bits = width(options.get('width'), typed === 'bus' || typed === 'register' ? 8 : 1, line);
-		if (options.has('width') && typed !== 'bus' && typed !== 'register') throw new SchematicSyntaxError(`Option width is not supported for ${typed}.`, line);
-		if (typed === 'bus' && bits < 2) throw new SchematicSyntaxError('Bus width must be at least 2.', line);
-		const variants = DIGITAL_VARIANTS[typed];
-		const variant = variants === undefined ? undefined : enumOption(options.get('type'), variants[0], variants[1], 'type', line);
-		if (variant === undefined && options.has('type')) throw new SchematicSyntaxError(`Option type is not supported for ${typed}.`, line);
-		if (typed === 'adder' && variant === 'full' && !options.has('inputs')) inputs = 3;
-		if (typed === 'mux' && variant === 'demux') {
+		const [di, do_] = DIGITAL_DEFAULTS[k];
+		let inputs = count(options.get('inputs'), di === 0 ? 1 : di, 'inputs', line);
+		let outputs = count(options.get('outputs'), do_, 'outputs', line);
+		if ((k === 'logic' || k === 'clock') && options.has('inputs')) throw new SchematicSyntaxError(`${k} does not accept inputs.`, line);
+		const bits = width(options.get('width'), k === 'bus' || k === 'register' ? 8 : 1, line);
+		if (options.has('width') && k !== 'bus' && k !== 'register') throw new SchematicSyntaxError(`Option width is not supported for ${k}.`, line);
+		if (k === 'bus' && bits < 2) throw new SchematicSyntaxError('Bus width must be at least 2.', line);
+		const vars = DIGITAL_VARIANTS[k];
+		const v = vars === undefined ? undefined : enumOption(options.get('type'), vars[0], vars[1], 'type', line);
+		if (v === undefined && options.has('type')) throw new SchematicSyntaxError(`Option type is not supported for ${k}.`, line);
+		if (k === 'adder' && v === 'full' && !options.has('inputs')) inputs = 3;
+		if (k === 'mux' && v === 'demux') {
 			if (!options.has('inputs')) inputs = 1;
 			if (!options.has('outputs')) outputs = 2;
 		}
-		if (typed === 'bus' && variant === 'joiner' && !options.has('outputs')) outputs = 1;
-		if ((typed === 'buffer' && (inputs !== 1 || outputs !== 1)) || ((typed === 'logic' || typed === 'clock') && outputs !== 1)) {
-			throw new SchematicSyntaxError(`${typed} has fixed terminal counts.`, line);
+		if (k === 'bus' && v === 'joiner' && !options.has('outputs')) outputs = 1;
+		if ((k === 'buffer' && (inputs !== 1 || outputs !== 1)) || ((k === 'logic' || k === 'clock') && outputs !== 1)) {
+			throw new SchematicSyntaxError(`${k} has fixed terminal counts.`, line);
 		}
-		const component: DigitalComponent = {
-			kind: typed,
+		const comp: DigitalComponent = {
+			kind: k,
 			...common,
-			inputs: typed === 'logic' || typed === 'clock' ? 0 : inputs,
+			inputs: k === 'logic' || k === 'clock' ? 0 : inputs,
 			outputs,
 			width: bits,
-			bodyWidth: typed === 'buffer' || typed === 'logic' || typed === 'clock' ? 56 : 84,
+			bodyWidth: fixed ? 56 : 84,
 			bodyHeight: Math.max(52, Math.max(inputs, outputs) * 16 + 20),
 			...orientation(options, line),
 			...fit(options, line)
 		};
-		if (variant !== undefined) component.variant = variant as NonNullable<DigitalComponent['variant']>;
-		return component;
+		if (v !== undefined) comp.variant = v as NonNullable<DigitalComponent['variant']>;
+		return comp;
 	},
-	extents: (component) => [component.bodyWidth * 500 + 16_000, component.bodyHeight * 500 + 16_000],
+	extents: (c) => [c.bodyWidth * 500 + 16_000, c.bodyHeight * 500 + 16_000],
 	ports: digitalPorts,
-	resolve: digitalResolve,
-	draw(component, paint) {
-		if (component.kind === 'buffer') {
-			const bubble = component.variant === 'tristate-inverter' || component.variant === 'schmitt-inverter';
-			return `<path ${paint} d="M -44 0 H -28 M -28 -22 L 24 0 -28 22 Z M ${bubble ? 32 : 24} 0 H 44${component.variant?.startsWith('schmitt') === true ? ' M -17 -8 H -6 V 8 H 5' : ''}" />${bubble ? `<circle ${paint} cx="28" cy="0" r="4" />` : ''}${component.variant?.startsWith('tristate') === true ? `<path ${paint} d="M 0 42 V 12" />` : ''}`;
+	resolve(c, name) {
+		const pts = digitalPorts(c);
+		const exact = pts.find((e) => e.id === name);
+		if (exact !== undefined) return exact;
+		const { left, right } = digitalSides(c);
+		if (c.kind === 'bus' && name === 'tap') return pts.find((e) => e.id === right[0]);
+		const t = indexed(name, left.length, right.length);
+		if (t === undefined) return undefined;
+		const id = (t.output ? right : left)[t.index];
+		return pts.find((e) => e.id === id);
+	},
+	draw(c, p) {
+		if (c.kind === 'buffer') {
+			const bubble = c.variant === 'tristate-inverter' || c.variant === 'schmitt-inverter';
+			return (
+				P(p, `M -44 0 H -28 M -28 -22 L 24 0 -28 22 Z M ${bubble ? 32 : 24} 0 H 44${c.variant?.startsWith('schmitt') === true ? ' M -17 -8 H -6 V 8 H 5' : ''}`) +
+				(bubble ? C(p, 28, 0, 4) : '') +
+				(c.variant?.startsWith('tristate') === true ? P(p, 'M 0 42 V 12') : '')
+			);
 		}
-		const w = component.bodyWidth * 1000;
-		const h = component.bodyHeight * 1000;
-		/* A lead from each terminal to the body edge, on every side. */
+		const w = c.bodyWidth * 1000;
+		const h = c.bodyHeight * 1000;
 		let stubs = '';
-		for (const port of digitalPorts(component)) {
-			stubs += port.ny === 0
-				? `<path ${paint} d="M ${n(port.x)} ${n(port.y)} H ${n(port.nx * (w / 2))}" />`
-				: `<path ${paint} d="M ${n(port.x)} ${n(port.y)} V ${n(port.ny * (h / 2))}" />`;
+		for (const pt of digitalPorts(c)) {
+			stubs += P(p, pt.ny === 0 ? `M ${n(pt.x)} ${n(pt.y)} H ${n(pt.nx * (w / 2))}` : `M ${n(pt.x)} ${n(pt.y)} V ${n(pt.ny * (h / 2))}`);
 		}
-		return `<rect ${paint} x="${n(-w / 2)}" y="${n(-h / 2)}" width="${component.bodyWidth}" height="${component.bodyHeight}" rx="3" />${stubs}`;
+		return R(p, n(-w / 2), n(-h / 2), c.bodyWidth, c.bodyHeight, 3) + stubs;
 	},
-	inner(component) {
-		const value =
-			component.kind === 'buffer'
+	inner(c) {
+		const val =
+			c.kind === 'buffer'
 				? ''
-				: component.kind === 'logic'
-					? component.variant === 'high' ? '1' : component.variant === 'low' ? '0' : component.variant === 'high-z' ? 'Z' : 'X'
-					: component.kind === 'mux'
-						? component.variant === 'demux' ? 'DEMUX' : 'MUX'
-						: component.kind === 'adder'
-							? component.variant === 'full' ? 'FA' : 'HA'
-							: component.kind === 'flipflop' || component.kind === 'bus'
-								? String(component.variant).toUpperCase()
-								: DIGITAL_LABELS[component.kind]!;
-		return value === '' ? '' : `<text ${colorAttributes(component.color, 'schematic-gate-symbol')} stroke="none" x="0" y="4" text-anchor="middle" font-size="11">${value}</text>`;
+				: c.kind === 'logic'
+					? LOGIC_TEXT[c.variant!]!
+					: c.kind === 'mux'
+						? c.variant === 'demux' ? 'DEMUX' : 'MUX'
+						: c.kind === 'adder'
+							? c.variant === 'full' ? 'FA' : 'HA'
+							: c.kind === 'flipflop' || c.kind === 'bus'
+								? String(c.variant).toUpperCase()
+								: DIGITAL_LABELS[c.kind]!;
+		return val === '' ? '' : `<text ${colorAttributes(c.color, 'schematic-gate-symbol')} stroke="none" x="0" y="4" text-anchor="middle" font-size="11">${val}</text>`;
 	},
-	symbol: (component) =>
-		`digital-${component.kind}-${component.variant ?? ''}-${component.inputs}-${component.outputs}-${component.bodyWidth}-${component.bodyHeight}${
-			component.rows === undefined ? '' : `-${component.rows.left.join('_')}-${component.rows.right.join('_')}`
-		}`
+	symbol: (c) =>
+		`digital-${c.kind}-${c.variant ?? ''}-${c.inputs}-${c.outputs}-${c.bodyWidth}-${c.bodyHeight}${c.rows === undefined ? '' : `-${c.rows.left.join('_')}-${c.rows.right.join('_')}`}`
 };
 
 export const LOGIC_KINDS: Readonly<Record<string, KindDef<never>>> = {

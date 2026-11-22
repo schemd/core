@@ -142,14 +142,15 @@ const BUDGETS = [
 		module: '../src/schema.ts',
 		entry: (path) => `import * as schema from ${JSON.stringify(path)};globalThis.schemdSchema=schema;`,
 		/*
-		 * New in 1.3. The schema is data, but describeComponentPorts asks the
-		 * symbol registry for a kind's ports, so the parsers of every kind come
-		 * with it. Only a tool that lists components imports this entry; the two
-		 * budgets above do not include it. 16,465 B gzip and 14,565 B brotli-11
-		 * when it was added; nearly all of it is the symbol registry.
+		 * New in 1.3. Originally 16,465 B gzip and 14,565 B brotli-11 because
+		 * `describeComponentPorts` imported the symbol registry. Decoupled in
+		 * 1.3.2 to derive ports and validate options standalone, dropping to
+		 * 4,059 B gzip and 3,631 B brotli-11 (lowered from 16.5 / 14.5 KiB to
+		 * 4.5 / 4 KiB). Only a tool that lists components imports this entry;
+		 * the two budgets above do not include it.
 		 */
-		maxGzipBytes: 16.5 * 1024,
-		maxBrotliBytes: 14.5 * 1024
+		maxGzipBytes: 4.5 * 1024,
+		maxBrotliBytes: 4 * 1024
 	}
 ];
 
