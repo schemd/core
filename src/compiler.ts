@@ -5,7 +5,7 @@ import { assertParsedSchematicDocument, parseSchematic } from './parser.js';
 import type { SchematicPlacement } from './placement.js';
 import { renderSchematicSized } from './renderer.js';
 import { parsedSchematicEvidence } from './route-cache.js';
-import type { CompileSchematicOptions, SchematicDocument } from './types.js';
+import type { CompileSchematicOptions, SchematicDocument, SchematicSheet } from './types.js';
 
 /** Small, allocation-bounded compilation counters. */
 export interface SchematicCompilationMetrics {
@@ -52,6 +52,7 @@ export interface SchematicSourceMap {
 export interface SchematicCompilation {
 	readonly document: SchematicDocument;
 	readonly svg: string;
+	readonly sheet: SchematicSheet;
 	readonly metrics: SchematicCompilationMetrics;
 	readonly sourceMap: SchematicSourceMap;
 	/**
@@ -82,20 +83,15 @@ export interface SchematicCompilation {
  */
 export function schematicSourceMap(document: SchematicDocument): SchematicSourceMap {
 	assertParsedSchematicDocument(document);
-	const nodes: SchematicNodeSource[] = [];
-	for (const component of document.components) {
-		nodes.push({ id: component.id, line: component.line });
-	}
-	const wires: SchematicWireSource[] = [];
-	for (const connection of document.connections) {
-		wires.push({
-			source: `${connection.from.componentId}.${connection.from.port}`,
-			target: `${connection.to.componentId}.${connection.to.port}`,
-			line: connection.line,
-			...(connection.netId === undefined ? {} : { netId: connection.netId })
-		});
-	}
-	return { nodes, wires };
+	return {
+		nodes: document.components.map((c) => ({ id: c.id, line: c.line })),
+		wires: document.connections.map((c) => ({
+			source: `${c.from.componentId}.${c.from.port}`,
+			target: `${c.to.componentId}.${c.to.port}`,
+			line: c.line,
+			...(c.netId === undefined ? {} : { netId: c.netId })
+		}))
+	};
 }
 
 /** Parse and render a schematic with one stable public call. */
@@ -107,15 +103,16 @@ export function compileSchematic(source: string, options: CompileSchematicOption
 	 */
 	const settled: CompileSchematicOptions = {
 		...options,
-		bounds: { ...options.bounds },
+		bounds: options.bounds === undefined || options.bounds === 'auto' ? 'auto' : { ...options.bounds },
 		limits: resolveSchematicLimits(options.limits)
 	};
 	const document = parseSchematic(source, settled);
-	const { svg, byteLength } = renderSchematicSized(document, settled);
+	const { svg, byteLength, sheet } = renderSchematicSized(document, settled);
 	const evidence = parsedSchematicEvidence(document);
 	return {
 		document,
 		svg,
+		sheet,
 		metrics: {
 			sourceCharacters: source.length,
 			components: document.components.length,

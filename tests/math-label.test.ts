@@ -33,6 +33,7 @@ describe('micro math labels', () => {
 
 	test('keeps plain and unknown commands compact and safe', () => {
 		expect(renderMathLabelTspans('10k & stable')).toBe('10k &amp; stable');
+		expect(renderMathLabelTspans('\\unknown')).toBe('\\unknown');
 		expect(renderMathLabelTspans(`<&>"'`)).toBe('&lt;&amp;&gt;&quot;&#39;');
 		expect(mathLabelText('\\custom{x}')).toBe('\\customx');
 		expect(mathLabelText('}')).toBe('}');

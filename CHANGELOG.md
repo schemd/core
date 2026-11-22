@@ -2,6 +2,24 @@
 
 All notable changes to `@schemd/core` are recorded here. Dates describe actual npm publication dates; unpublished versions deliberately use `Unreleased`.
 
+## [1.4.0] - Unreleased
+
+A schemd document no longer has to state its canvas or the position of every part: the sheet can be measured from the drawing, and a part declared with no position is drafted from its wires. Both are opt-in by syntax — every document that states its bounds and every position compiles byte-for-byte identically to `1.3.1`, now 2×–5× faster and with a >50% smaller shipped package.
+
+### Added
+
+- **Measured sheet (`bounds="auto"` or omitted `bounds`).** `parseSchematicFence`, `parseSchematic`, `renderSchematic`, `compileSchematic`, and `snapshotSchematic` now accept `bounds: 'auto'` or omitted `bounds`. Wires route on an open canvas and the compiler computes the tightest integer `SchematicSheet` (`{ x, y, width, height }`) around all parts, labels, traces, and wire labels with `SCHEMATIC_SHEET_MARGIN` (24 units) on each side. `compileSchematic` now returns `sheet: SchematicSheet`.
+- **Draft placement for unplaced declarations.** Declarations may omit coordinates (`resistor:R1 "1 k" #amber`). A deterministic breadth-first lowering pass (`src/draft.ts`) derives positions from wires in source order (`DRAFT_PIN_GAP`, `DRAFT_CLEARANCE`, `DRAFT_ORIGIN`, `DRAFT_BAND_WIDTH`), holds back relative placements that reference drafted parts until after drafting, and reports every derived coordinate in `placements`.
+
+### Changed
+
+- **Over 50% smaller shipped package (`dist/`) and 75% smaller `@schemd/core/schema`.** `npm run build` now emits minified multi-entry ESM across all 13 `package.json` exports with comment-stripped `.d.ts` declarations (`dist/` drops >53% vs unminified `tsc` output, from ~446 KB to 209 KB). `describeComponentPorts` validates options and derives canonical ports standalone instead of importing the symbol registry, shrinking `@schemd/core/schema` from 16,574 B to 4,059 B gzip (−75.5%; budget lowered from 16.5 KiB to 4.5 KiB gzip). Compiler and package gzip ceilings move from 44/47 KiB to 46/49 KiB (40/42.5 KiB brotli-11) for the measured sheet and draft placement pass.
+- **2×–5× faster compilation and routing.** Reworked the orthogonal router with bit-packed `(cell << 2) | dir` A* states, reusable module-scoped typed arrays, gap-skipping coordinate generation, O(1) wide-window spatial queries, `maxF` pruning on crossing avoidance, reverse A* for collinear facing-away pins, and a single-slot heap bypass. Added non-`d` fast regex scanning during strict `parseSchematic` with lazy span rescanning on errors, ASCII-fast text width measurement, `TextEncoder.encodeInto` in `BoundedSvgWriter`, and 16 KiB batched SVG component output. On `darwin-arm64` (Node v26): `dense-16x16-routing` 16.15 ms → ~3.1 ms (−80%), `maximum-512-components` 3.11 ms → ~1.13 ms (−64%), `contended-12-wire-bus` 1.68 ms → ~0.87 ms (−48–53%), and `simple-rc` 0.34 ms → 0.24 ms cold / 0.11 ms warm (−69%).
+
+### Verified
+
+- All 1,233 tests pass with 100% statement, branch, function, and line coverage; 148 of 148 targeted mutants are killed; 20,000 contract-fuzz cases pass; byte-for-byte parity verified against `1.3.1` and PR #21 across all 94 kinds, variants, modes, golden fixtures, auto-canvas/draft cases, and 1,000 random circuits; all 13 public entry points verify from the packed tarball in Node and strict TypeScript.
+
 ## [1.3.1] - 2026-10-26
 
 ### Fixed

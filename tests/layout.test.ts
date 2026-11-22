@@ -1,6 +1,7 @@
 /** Component geometry, port placement, route avoidance, and bridge-crossing verification. */
 import { describe, expect, test } from 'vitest';
 import {
+	canonicalPortName,
 	classicalGateHeight,
 	compileSchematic,
 	composeQuarterTurns,
@@ -1405,5 +1406,6 @@ describe('bridges and same-net dots on bare terminals', () => {
 		);
 		expect(routes[2]).toMatchObject({ d: 'M 300 62 V 258', joins: [{ x: 300, y: 100 }, { x: 300, y: 200 }] });
 		expect(routes[0]!.joins).toBeUndefined();
+		expect(() => canonicalPortName(terminal('A', 50, 100), 'nonexistent')).toThrow('Validated port A.nonexistent is missing.');
 	});
 });

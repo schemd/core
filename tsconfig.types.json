@@ -5,7 +5,7 @@
 		"declarationMap": false,
 		"emitDeclarationOnly": true,
 		"outDir": "dist",
-		"removeComments": false,
+		"removeComments": true,
 		"rootDir": "src"
 	},
 	"include": ["src/**/*.ts"],

@@ -1,37 +1,6 @@
-/**
- * `fit=wires`: parts that take their height from their wires.
- *
- * A block with several terminals on a side has a fixed pitch, so the wires
- * feeding it bend to meet its pins: three qubit rails 100 units apart jog in to
- * a CNOT whose rails are 18 apart, and out again. A part declared `fit=wires`
- * turns that round. Each of its terminals takes the height of the terminal it
- * is wired to, the part is centred between them, and a block's body grows to
- * hold them, so the wires arrive straight.
- *
- * What lines up:
- *
- * - a multi-track quantum gate's rails (CNOT, swap, controlled gates, barrier,
- *   delay): one height per qubit, taken from its input's wire, or its output's
- *   when the input is unwired. Rails may come in any order, so a CNOT whose
- *   control sits below its target needs no special syntax;
- * - a block's left and right pins (ICs and digital blocks): each side keeps its
- *   terminals in their declared order, top to bottom.
- *
- * A terminal with no wire is spaced from its wired neighbours at the part's
- * usual pitch. A part with nothing wired to those terminals keeps its usual
- * shape. Fitted parts are settled left to right — then top to bottom, then by
- * id — and each reads only the parts settled before it, so a chain of CNOTs
- * fits from its first gate onwards and the result never depends on the order
- * the declarations were written in.
- *
- * Placement runs first, so a part placed relative to a fitted one is measured
- * against its unfitted shape.
- *
- * @module
- */
 import { fromMilli, roundDiv, toMilli } from './geom.js';
-import { resolvePortPoint } from './layout.js';
-import { definition } from './symbols/index.js';
+import { distributed } from './symbols/common.js';
+import { definition, resolvePlaced } from './symbols/index.js';
 import {
 	SchematicSyntaxError,
 	type DigitalComponent,
@@ -42,126 +11,101 @@ import {
 	type SchematicConnection
 } from './types.js';
 
-/** The least distance between two fitted terminals: a router channel and a clearance. */
 export const FIT_GAP = 16;
 
 type Fitted = (IcComponent | DigitalComponent | QuantumGateComponent | QuantumSpecialComponent) & { fit: 'wires' };
+const isFitted = (c: SchematicComponent): c is Fitted => 'fit' in c && c.fit === 'wires';
+const u = (m: number): string => String(fromMilli(m));
 
-function isFitted(component: SchematicComponent): component is Fitted {
-	return 'fit' in component && component.fit === 'wires';
-}
-
-/** Where one terminal's wire arrives, in milli-units, or `undefined` if nothing settled is wired to it. */
-function arrival(
-	component: SchematicComponent,
-	port: string,
-	connections: readonly SchematicConnection[],
-	byId: ReadonlyMap<string, SchematicComponent>,
-	pending: ReadonlySet<string>
-): number | undefined {
-	let best: { dx: number; y: number; key: string } | undefined;
-	for (const connection of connections) {
-		const [near, far] =
-			connection.from.componentId === component.id && connection.from.port === port
-				? [connection.from, connection.to]
-				: connection.to.componentId === component.id && connection.to.port === port
-					? [connection.to, connection.from]
-					: [undefined, undefined];
-		if (near === undefined || far.componentId === component.id || pending.has(far.componentId)) continue;
-		const point = resolvePortPoint(byId.get(far.componentId)!, far.port);
-		const candidate = { dx: Math.abs(toMilli(point.x) - toMilli(component.x)), y: toMilli(point.y), key: `${far.componentId}.${far.port}` };
-		/* The nearest wired terminal along the part's axis decides; ties go to the
-		   higher one, then to the name, so the choice never rests on source order. */
-		if (
-			best === undefined ||
-			candidate.dx < best.dx ||
-			(candidate.dx === best.dx && (candidate.y < best.y || (candidate.y === best.y && candidate.key < best.key)))
-		) {
-			best = candidate;
+function arrival(c: SchematicComponent, port: string, connections: readonly SchematicConnection[], byId: ReadonlyMap<string, SchematicComponent>, pending: ReadonlySet<string>): number | undefined {
+	let bestDx = Infinity;
+	let bestY = 0;
+	let bestKey = '';
+	const cx = toMilli(c.x);
+	for (const cn of connections) {
+		const far =
+			cn.from.componentId === c.id && cn.from.port === port
+				? cn.to
+				: cn.to.componentId === c.id && cn.to.port === port
+					? cn.from
+					: undefined;
+		if (far === undefined || far.componentId === c.id || pending.has(far.componentId)) continue;
+		const pt = resolvePlaced(byId.get(far.componentId)!, far.port)!.point;
+		const dx = Math.abs(pt.x - cx);
+		const key = `${far.componentId}.${far.port}`;
+		if (dx < bestDx || (dx === bestDx && (pt.y < bestY || (pt.y === bestY && key < bestKey)))) {
+			bestDx = dx;
+			bestY = pt.y;
+			bestKey = key;
 		}
 	}
-	return best?.y;
+	return bestDx === Infinity ? undefined : bestY;
 }
 
-/** Fill unwired slots from their wired neighbours: between two by interpolation, beyond them at `pitch`. */
 function fill(known: readonly (number | undefined)[], pitch: number): number[] | undefined {
-	const wired = known.flatMap((value, index) => (value === undefined ? [] : [index]));
+	const wired: number[] = [];
+	for (let i = 0; i < known.length; i += 1) if (known[i] !== undefined) wired.push(i);
 	if (wired.length === 0) return undefined;
 	const first = wired[0]!;
 	const last = wired.at(-1)!;
-	return known.map((value, index) => {
-		if (value !== undefined) return value;
-		if (index < first) return known[first]! - (first - index) * pitch;
-		if (index > last) return known[last]! + (index - last) * pitch;
-		const below = wired.filter((entry) => entry < index).at(-1)!;
-		const above = wired.find((entry) => entry > index)!;
-		return known[below]! + roundDiv((known[above]! - known[below]!) * (index - below), above - below);
+	return known.map((v, i) => {
+		if (v !== undefined) return v;
+		if (i < first) return known[first]! - (first - i) * pitch;
+		if (i > last) return known[last]! + (i - last) * pitch;
+		const lo = wired.filter((e) => e < i).at(-1)!;
+		const hi = wired.find((e) => e > i)!;
+		return known[lo]! + roundDiv((known[hi]! - known[lo]!) * (i - lo), hi - lo);
 	});
 }
 
-function units(milli: number): string {
-	return String(fromMilli(milli));
-}
-
-/** A quantum gate's rails, one height per qubit. */
-function fitRails(
-	component: QuantumGateComponent | QuantumSpecialComponent,
-	connections: readonly SchematicConnection[],
-	byId: ReadonlyMap<string, SchematicComponent>,
-	pending: ReadonlySet<string>
-): void {
-	const ports = definition(component).ports(component);
-	const inputs = ports.filter((entry) => entry.nx < 0 && entry.ny === 0);
-	const outputs = ports.filter((entry) => entry.nx > 0 && entry.ny === 0);
-	const known = inputs.map(
-		(input, index) =>
-			arrival(component, input.id, connections, byId, pending) ?? arrival(component, outputs[index]!.id, connections, byId, pending)
+function fitRails(c: QuantumGateComponent | QuantumSpecialComponent, connections: readonly SchematicConnection[], byId: ReadonlyMap<string, SchematicComponent>, pending: ReadonlySet<string>): void {
+	const ports = definition(c).ports(c);
+	const ins = ports.filter((e) => e.nx < 0 && e.ny === 0);
+	const outs = ports.filter((e) => e.nx > 0 && e.ny === 0);
+	const rails = fill(
+		ins.map((p, i) => arrival(c, p.id, connections, byId, pending) ?? arrival(c, outs[i]!.id, connections, byId, pending)),
+		18_000
 	);
-	const rails = fill(known, 18_000);
 	if (rails === undefined) return;
-	const order = rails.map((value, index) => ({ value, index })).sort((a, b) => a.value - b.value);
-	for (let index = 1; index < order.length; index += 1) {
-		const [upper, lower] = [order[index - 1]!, order[index]!];
-		if (lower.value - upper.value < FIT_GAP * 1000) {
+	const order = rails.map((v, i) => [v, i] as const).sort((a, b) => a[0] - b[0]);
+	for (let i = 1; i < order.length; i += 1) {
+		const [uv, ui] = order[i - 1]!;
+		const [lv, li] = order[i]!;
+		if (lv - uv < FIT_GAP * 1000) {
 			throw new SchematicSyntaxError(
-				`${component.id} cannot line up rails ${upper.index + 1} and ${lower.index + 1} with their wires: they arrive ${units(lower.value - upper.value)} units apart, and rails need at least ${FIT_GAP}. Move the wire on rail ${lower.index + 1} to y >= ${units(upper.value + FIT_GAP * 1000)}, or remove fit=wires.`,
-				component.line,
+				`${c.id} cannot line up rails ${ui + 1} and ${li + 1} with their wires: they arrive ${u(lv - uv)} units apart, and rails need at least ${FIT_GAP}. Move the wire on rail ${li + 1} to y >= ${u(uv + FIT_GAP * 1000)}, or remove fit=wires.`,
+				c.line,
 				undefined,
 				'geometry'
 			);
 		}
 	}
-	const centre = roundDiv(order[0]!.value + order.at(-1)!.value, 2);
-	component.y = fromMilli(centre);
-	component.rails = rails.map((value) => fromMilli(value - centre));
+	const centre = roundDiv(order[0]![0] + order.at(-1)![0], 2);
+	c.y = fromMilli(centre);
+	c.rails = rails.map((v) => fromMilli(v - centre));
 }
 
-/** A block's left and right pins, each side in its declared order. */
-function fitRows(
-	component: IcComponent | DigitalComponent,
-	connections: readonly SchematicConnection[],
-	byId: ReadonlyMap<string, SchematicComponent>,
-	pending: ReadonlySet<string>
-): void {
-	const ports = definition(component).ports(component);
-	const pitch = component.kind === 'ic' ? 18_000 : 16_000;
+function fitRows(c: IcComponent | DigitalComponent, connections: readonly SchematicConnection[], byId: ReadonlyMap<string, SchematicComponent>, pending: ReadonlySet<string>): void {
+	const ports = definition(c).ports(c);
+	const pitch = c.kind === 'ic' ? 18_000 : 16_000;
 	const sides = (['left', 'right'] as const).map((side) => {
-		const terminals = ports.filter((entry) => entry.ny === 0 && (side === 'left' ? entry.nx < 0 : entry.nx > 0));
-		const known = terminals.map((entry) => arrival(component, entry.id, connections, byId, pending));
-		return { side, terminals, rows: fill(known, pitch) };
+		const terms = ports.filter((e) => e.ny === 0 && (side === 'left' ? e.nx < 0 : e.nx > 0));
+		return { side, terms, rows: fill(terms.map((e) => arrival(c, e.id, connections, byId, pending)), pitch) };
 	});
-	const wired = sides.flatMap((entry) => entry.rows ?? []);
+	const wired = sides.flatMap((e) => e.rows ?? []);
 	if (wired.length === 0) return;
-	for (const { side, terminals, rows } of sides) {
-		for (let index = 1; rows !== undefined && index < rows.length; index += 1) {
-			const [upper, lower] = [rows[index - 1]!, rows[index]!];
-			if (lower - upper >= FIT_GAP * 1000) continue;
-			const [above, below] = [terminals[index - 1]!.id, terminals[index]!.id];
+	for (const { side, terms, rows } of sides) {
+		for (let i = 1; rows !== undefined && i < rows.length; i += 1) {
+			const up = rows[i - 1]!;
+			const lo = rows[i]!;
+			if (lo - up >= FIT_GAP * 1000) continue;
+			const above = terms[i - 1]!.id;
+			const below = terms[i]!.id;
 			throw new SchematicSyntaxError(
-				lower <= upper
-					? `${component.id} cannot line up ${below} with its wire: it arrives at y=${units(lower)}, ${lower === upper ? 'level with' : 'above'} ${above}'s at y=${units(upper)}, but ${below} sits below ${above} on ${component.id}'s ${side} side. Swap the wires, reorder the pins, or remove fit=wires.`
-					: `${component.id} cannot line up ${below} with its wire: it arrives ${units(lower - upper)} units below ${above}'s, and pins need at least ${FIT_GAP}. Move the wire on ${below} to y >= ${units(upper + FIT_GAP * 1000)}, or remove fit=wires.`,
-				component.line,
+				lo <= up
+					? `${c.id} cannot line up ${below} with its wire: it arrives at y=${u(lo)}, ${lo === up ? 'level with' : 'above'} ${above}'s at y=${u(up)}, but ${below} sits below ${above} on ${c.id}'s ${side} side. Swap the wires, reorder the pins, or remove fit=wires.`
+					: `${c.id} cannot line up ${below} with its wire: it arrives ${u(lo - up)} units below ${above}'s, and pins need at least ${FIT_GAP}. Move the wire on ${below} to y >= ${u(up + FIT_GAP * 1000)}, or remove fit=wires.`,
+				c.line,
 				undefined,
 				'geometry'
 			);
@@ -169,42 +113,28 @@ function fitRows(
 	}
 	const centre = roundDiv(Math.min(...wired) + Math.max(...wired), 2);
 	let reach = 0;
-	for (const value of wired) reach = Math.max(reach, Math.abs(value - centre));
-	/* A pad of one pitch keeps the outermost pins off the corners, as the
-	   unfitted spacing does; the body never shrinks below its usual height. */
-	const height = Math.max(component.bodyHeight * 1000, 2 * (reach + pitch));
-	const placed = sides.map(({ terminals, rows }) =>
-		rows === undefined
-			? terminals.map((_, index) => roundDiv((index + 1) * height * 2 - height * (terminals.length + 1), 2 * (terminals.length + 1)))
-			: rows.map((value) => value - centre)
+	for (const v of wired) reach = Math.max(reach, Math.abs(v - centre));
+	const height = Math.max(c.bodyHeight * 1000, 2 * (reach + pitch));
+	const placed = sides.map(({ terms, rows }) =>
+		(rows === undefined ? terms.map((_, i) => distributed(i, terms.length, height)) : rows.map((v) => v - centre)).map(fromMilli)
 	);
-	component.y = fromMilli(centre);
-	component.bodyHeight = fromMilli(height);
-	component.rows = { left: placed[0]!.map(fromMilli), right: placed[1]!.map(fromMilli) };
+	c.y = fromMilli(centre);
+	c.bodyHeight = fromMilli(height);
+	c.rows = { left: placed[0]!, right: placed[1]! };
 }
 
-/**
- * Settle every `fit=wires` part against the wires validated for it.
- *
- * @param components - Placed components; fitted ones are updated in place.
- * @param connections - Validated connections with canonical terminal names.
- * @param report - Receives each part that cannot be fitted; fitting goes on.
- */
-export function fitComponents(
-	components: readonly SchematicComponent[],
-	connections: readonly SchematicConnection[],
-	report: (error: unknown) => void
-): void {
-	const fitted = components.filter(isFitted);
-	if (fitted.length === 0) return;
-	const byId = new Map(components.map((component) => [component.id, component]));
-	const order = [...fitted].sort((a, b) => toMilli(a.x) - toMilli(b.x) || toMilli(a.y) - toMilli(b.y) || (a.id < b.id ? -1 : 1));
-	const pending = new Set(order.map((component) => component.id));
-	for (const component of order) {
-		pending.delete(component.id);
+export function fitComponents(components: readonly SchematicComponent[], connections: readonly SchematicConnection[], report: (error: unknown) => void): void {
+	if (!components.some(isFitted)) return;
+	const byId = new Map(components.map((c) => [c.id, c]));
+	const order = components
+		.filter(isFitted)
+		.sort((a, b) => toMilli(a.x) - toMilli(b.x) || toMilli(a.y) - toMilli(b.y) || (a.id < b.id ? -1 : 1));
+	const pending = new Set(order.map((c) => c.id));
+	for (const c of order) {
+		pending.delete(c.id);
 		try {
-			if (component.kind === 'ic' || 'bodyHeight' in component) fitRows(component as IcComponent | DigitalComponent, connections, byId, pending);
-			else fitRails(component, connections, byId, pending);
+			if (c.kind === 'ic' || 'bodyHeight' in c) fitRows(c as IcComponent | DigitalComponent, connections, byId, pending);
+			else fitRails(c, connections, byId, pending);
 		} catch (error) {
 			report(error);
 		}

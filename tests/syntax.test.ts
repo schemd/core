@@ -78,6 +78,11 @@ function scanned(text: string): unknown {
 			return { form: 'relative', kind: syntax.kind.text, id: syntax.id.text, label: syntax.label?.text, relations: syntax.relations, tail: syntax.tail.text };
 		case 'connection':
 			return { form: 'connection', fromId: syntax.fromId.text, fromPort: syntax.fromPort.text, toId: syntax.toId.text, toPort: syntax.toPort.text, tail: syntax.tail.text };
+		/* 0.8 had no declaration without a position and rejected every such line.
+		   Reading the new form as that rejection makes the comparison below prove
+		   the form claims only lines that were errors before. */
+		case 'unplaced':
+			return undefined;
 	}
 }
 
